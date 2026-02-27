@@ -16,7 +16,6 @@ Or standalone:
 import asyncio
 import json
 import os
-import re
 import subprocess
 from pathlib import Path
 
@@ -82,30 +81,111 @@ as described in your instructions. Start your response with {{ and end with }}.
 """
 
 
-def extract_json_from_text(text: str) -> dict:
+def _validate_json_object(
+    obj: object,
+    required_keys: set[str] | None,
+    exact_keys: bool,
+) -> tuple[bool, str]:
+    """Validate the parsed JSON object shape."""
+    if not isinstance(obj, dict):
+        return False, f"Parsed JSON was {type(obj).__name__}, expected object"
+
+    if not required_keys:
+        return True, ""
+
+    parsed_keys = set(obj.keys())
+    missing = required_keys - parsed_keys
+    if missing:
+        return False, f"Missing required keys: {sorted(missing)}"
+
+    if exact_keys and parsed_keys != required_keys:
+        extra = parsed_keys - required_keys
+        return False, f"Unexpected keys present: {sorted(extra)}"
+
+    return True, ""
+
+
+def extract_json_from_text(
+    text: str,
+    required_keys: set[str] | None = None,
+    exact_keys: bool = False,
+) -> dict:
     """
     Extract a JSON object from the agent's text output.
 
     The agent is instructed to output only JSON, but may occasionally
     include surrounding text. This handles that gracefully.
     """
-    # Try direct parse first
-    text = text.strip()
-    if text.startswith("{"):
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
+    cleaned = text.strip()
+    errors: list[str] = []
 
-    # Find JSON block in the text
-    match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
+    # Stage 1: try parsing whole output directly
+    try:
+        parsed = json.loads(cleaned)
+        valid, reason = _validate_json_object(parsed, required_keys, exact_keys)
+        if valid:
+            return parsed
+        errors.append(f"Direct parse shape invalid: {reason}")
+    except json.JSONDecodeError as exc:
+        errors.append(f"Direct parse failed: {exc.msg} at pos {exc.pos}")
 
-    raise ValueError(f"Could not extract valid JSON from agent output:\n{text[:500]}")
+    # Stage 2: parse fenced code blocks (```json ... ``` or generic ``` ... ```)
+    fenced_blocks: list[str] = []
+    if "```" in cleaned:
+        for marker in ("```json", "```JSON", "```"):
+            start = 0
+            while True:
+                open_idx = cleaned.find(marker, start)
+                if open_idx == -1:
+                    break
+                content_start = open_idx + len(marker)
+                # Skip optional leading newline after fence marker
+                if content_start < len(cleaned) and cleaned[content_start] == "\n":
+                    content_start += 1
+                close_idx = cleaned.find("```", content_start)
+                if close_idx == -1:
+                    break
+                block = cleaned[content_start:close_idx].strip()
+                if block:
+                    fenced_blocks.append(block)
+                start = close_idx + 3
+
+    for i, block in enumerate(fenced_blocks, 1):
+        try:
+            parsed = json.loads(block)
+            valid, reason = _validate_json_object(parsed, required_keys, exact_keys)
+            if valid:
+                return parsed
+            errors.append(f"Fenced block #{i} shape invalid: {reason}")
+        except json.JSONDecodeError as exc:
+            errors.append(f"Fenced block #{i} parse failed: {exc.msg} at pos {exc.pos}")
+
+    # Stage 3: scan for JSON objects with raw_decode from each '{' position
+    decoder = json.JSONDecoder()
+    for idx, char in enumerate(cleaned):
+        if char != "{":
+            continue
+        candidate = cleaned[idx:]
+        try:
+            parsed, _ = decoder.raw_decode(candidate)
+        except json.JSONDecodeError:
+            continue
+
+        valid, reason = _validate_json_object(parsed, required_keys, exact_keys)
+        if valid:
+            return parsed
+        errors.append(f"raw_decode object at index {idx} shape invalid: {reason}")
+
+    start_preview = cleaned[:300]
+    end_preview = cleaned[-300:] if len(cleaned) > 300 else cleaned
+    raise ValueError(
+        "Could not extract valid JSON from agent output.\n"
+        f"Required keys: {sorted(required_keys) if required_keys else 'none'}\n"
+        f"Exact keys required: {exact_keys}\n"
+        f"Parsing stages attempted: {' | '.join(errors[:8])}\n"
+        f"Output start:\n{start_preview}\n\n"
+        f"Output end:\n{end_preview}"
+    )
 
 
 def write_env_file(config_data: dict, env_path: Path | None = None) -> Path:

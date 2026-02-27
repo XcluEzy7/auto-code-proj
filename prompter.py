@@ -25,6 +25,7 @@ from configure import extract_json_from_text
 
 DEFAULT_ANALYSIS_MODEL = "claude-haiku-4-5-20251001"
 DEFAULT_GENERATION_MODEL = "claude-sonnet-4-6"
+GENERATION_REQUIRED_KEYS = {"app_spec", "initializer_prompt", "coding_prompt"}
 
 ANALYSIS_SYSTEM_PROMPT = """\
 You are a technical architect analyzing product requirements documents.
@@ -272,7 +273,13 @@ async def run_generation_session(
         "For initializer_prompt.md: Follow the INITIALIZER AGENT template format exactly.\n"
         "For coding_prompt.md: Follow the CODING AGENT template format exactly.\n\n"
         "Customize all content for the specific project described above.\n"
-        "Output ONLY a valid JSON object with keys: app_spec, initializer_prompt, coding_prompt."
+        "Output requirements:\n"
+        "- Return exactly one JSON object.\n"
+        "- Do not include markdown fences.\n"
+        "- Do not include explanations before or after JSON.\n"
+        "- The response must start with { and end with }.\n"
+        "- Include exactly these keys: app_spec, initializer_prompt, coding_prompt.\n"
+        "- Ensure all newlines inside values are valid JSON escaped newlines."
     )
 
     result = subprocess.run(
@@ -290,7 +297,58 @@ async def run_generation_session(
     if result.returncode != 0:
         raise RuntimeError(result.stderr[:500] or "(no stderr)")
 
-    return extract_json_from_text(result.stdout)
+    try:
+        return extract_json_from_text(
+            result.stdout,
+            required_keys=GENERATION_REQUIRED_KEYS,
+            exact_keys=True,
+        )
+    except ValueError as first_error:
+        print("Generation output was malformed. Retrying once with strict repair instructions...\n")
+
+        repair_query = (
+            "Your previous output could not be parsed as valid JSON.\n\n"
+            f"Parse error:\n{first_error}\n\n"
+            "Re-output the content as a single valid JSON object only.\n"
+            "Rules:\n"
+            "- No markdown fences.\n"
+            "- No explanation.\n"
+            "- Start with { and end with }.\n"
+            "- Include exactly these keys: app_spec, initializer_prompt, coding_prompt.\n\n"
+            "Previous output to repair:\n"
+            f"{result.stdout[:12000]}"
+        )
+
+        retry_result = subprocess.run(
+            [
+                "claude", "-p",
+                "--model", model,
+                "--allowedTools", "Edit,Bash,Task",
+                "--system-prompt", GENERATION_SYSTEM_PROMPT,
+            ],
+            input=repair_query,
+            capture_output=True,
+            text=True,
+        )
+
+        if retry_result.returncode != 0:
+            raise RuntimeError(
+                f"Generation retry failed: {retry_result.stderr[:500] or '(no stderr)'}"
+            ) from first_error
+
+        try:
+            return extract_json_from_text(
+                retry_result.stdout,
+                required_keys=GENERATION_REQUIRED_KEYS,
+                exact_keys=True,
+            )
+        except ValueError as second_error:
+            raise RuntimeError(
+                "Generation failed after one retry.\n"
+                f"First parse error: {first_error}\n"
+                f"Second parse error: {second_error}\n"
+                f"Second output preview:\n{retry_result.stdout[:500]}"
+            ) from second_error
 
 
 def write_prompt_files(
