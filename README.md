@@ -73,6 +73,26 @@ python autonomous_agent_demo.py --project-dir ./my_project --max-iterations 3
 
 2. **Coding Agent (Sessions 2+):** Picks up where the previous session left off, implements features one by one, and marks them as passing in `feature_list.json`.
 
+### Stack Detection (`--configure`)
+
+Before the coding agents run, `--configure` reads your `prompts/` files and auto-detects the tech stack to write a `.env` configuration file. This saves you from manually figuring out the right dev server command, port, package manager, and agent system prompt for your stack.
+
+```bash
+# Detect stack and write .env, then start coding:
+python autonomous_agent_demo.py --configure --project-dir ./my_project
+
+# Regenerate .env after editing prompts/:
+python autonomous_agent_demo.py --configure
+```
+
+The configure agent reads `prompts/app_spec.txt` and outputs values like:
+- `FRAMEWORK` — e.g. `laravel`, `django`, `react`, `generic`
+- `PACKAGE_MANAGER` — e.g. `npm`, `pip`, `composer+npm`
+- `DEV_SERVER_CMD` / `DEV_SERVER_PORT` — how to start the app
+- `AGENT_SYSTEM_PROMPT` — a stack-tailored system prompt for the coding agents
+
+The resulting `.env` is loaded automatically on subsequent runs.
+
 ### Session Management
 
 - Each session runs with a fresh context window
