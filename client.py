@@ -34,6 +34,7 @@ BUILTIN_TOOLS = [
     "Glob",
     "Grep",
     "Bash",
+    "Task",       # enables subagent spawning and agent teams
 ]
 
 

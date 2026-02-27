@@ -62,6 +62,57 @@ pip install -r requirements.txt
 
 ---
 
+## Recommended Plugins
+
+These plugins are optional but significantly boost what the coding agents can do — enabling
+systematic workflows, specialist subagents, and parallel execution across multiple context windows.
+
+### Superpowers
+
+Superpowers gives the coding agents structured workflows for planning, TDD, debugging, code
+review, and subagent-driven development. It is installed as a slash command **inside** a Claude
+Code session (not in your terminal):
+
+```
+# Inside any Claude Code session (start one with: claude):
+/plugin marketplace add obra/superpowers-marketplace
+/plugin install superpowers@superpowers-marketplace
+```
+
+Takes effect in new sessions after install.
+
+### Awesome Claude Code Subagents
+
+127+ specialist agents (TypeScript, Python, Rust, Go, React, backend, frontend, etc.) that the
+coding agents can delegate to automatically. Install via your terminal:
+
+```bash
+# Language specialists (TypeScript, Python, Rust, Go, React, etc.)
+claude plugin install voltagent-lang
+
+# Infrastructure & DevOps (Docker, Kubernetes, CI/CD, cloud, etc.)
+claude plugin install voltagent-infra
+```
+
+Install both for full coverage. Once installed, the coding agents will automatically delegate to
+the right specialist — e.g. a TypeScript project will use the `typescript-pro` subagent for
+type-heavy work.
+
+### Agent Teams (Experimental)
+
+When enabled, the coding agent can spin up a lead plus multiple specialist teammates working in
+parallel (frontend dev + backend dev + QA), each in their own context window. Token cost is
+higher but wall-clock time drops significantly for large features.
+
+To enable, set this environment variable before running ACAP:
+
+```bash
+# Add to your shell profile or set before running ACAP:
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+```
+
+---
+
 ## Quick Start
 
 **Step 1: Generate your `prompts/` files from a PRD or product brief**

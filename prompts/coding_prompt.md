@@ -33,6 +33,41 @@ cat feature_list.json | grep '"passes": false' | wc -l
 Understanding the `app_spec.txt` is critical - it contains the full requirements
 for the application you're building.
 
+### USING SUBAGENTS (WORK FASTER IN PARALLEL)
+
+You have access to specialist subagents via the Task tool. Use them to keep your main context
+clean and to parallelize independent work.
+
+**Explore subagent — for codebase analysis:**
+Use the Explore subagent any time you need to understand a module, trace a code path, or search
+for patterns. This keeps your main context window free for implementation work.
+
+```
+Use the Explore subagent to find all database models and their relationships
+```
+
+**Parallel implementation — for features with separate layers:**
+When a feature has independent frontend and backend work, spawn both in parallel rather than
+doing them sequentially.
+
+```
+Implement the backend API endpoint and the React component for [feature] in parallel using
+separate subagents. Frontend subagent works on the UI, backend subagent handles the Express route.
+```
+
+**Language/framework specialists (if installed):**
+If the project uses TypeScript, React, Python, etc., prefer the specialist agent for that work —
+they have deeper context for that stack.
+
+```
+Use the typescript-pro subagent to implement the type-safe API client
+```
+
+**When NOT to use subagents:**
+- Tasks that need results before you can proceed (run those directly)
+- Simple single-file changes (not worth the overhead)
+- Anything that modifies `feature_list.json` (only you should do that)
+
 ### STEP 2: START SERVERS (IF NOT RUNNING)
 
 If `init.sh` exists, run it:

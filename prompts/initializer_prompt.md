@@ -56,6 +56,17 @@ Features can ONLY be marked as passing (change "passes": false to "passes": true
 Never remove features, never edit descriptions, never modify testing steps.
 This ensures no functionality is missed.
 
+**TIP: Speed up with parallel subagents**
+You can generate test cases faster by spawning parallel subagents, each responsible for a
+category. For example:
+- Subagent 1: functional tests for core CRUD operations (50 tests)
+- Subagent 2: functional tests for auth and permissions (50 tests)
+- Subagent 3: style and UI/UX tests (50 tests)
+- Subagent 4: edge cases, error states, and accessibility (50 tests)
+
+Each subagent returns its portion and you merge them into `feature_list.json`. Make sure all
+tests still start with `"passes": false`.
+
 ### SECOND TASK: Create init.sh
 
 Create a script called `init.sh` that future agents can use to quickly
