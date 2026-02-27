@@ -9,7 +9,12 @@ from pathlib import Path
 from unittest import mock
 
 from config import ProjectConfig, normalize_provider_id
-from provider_cli import has_env_var, resolve_provider_for_run, upsert_env_var
+from provider_cli import (
+    has_env_var,
+    resolve_model_for_run,
+    resolve_provider_for_run,
+    upsert_env_var,
+)
 
 
 class TestProviderConfig(unittest.TestCase):
@@ -61,6 +66,44 @@ class TestProviderConfig(unittest.TestCase):
                 )
             self.assertEqual(provider, "codex")
             self.assertIn("AGENT_CLI_ID=codex", env_path.read_text(encoding="utf-8"))
+
+    def test_resolve_model_defaults_non_interactive(self):
+        cfg = ProjectConfig(agent_cli_model_omp="claude-sonnet-4-5")
+        with (
+            mock.patch("provider_cli.sys.stdin.isatty", return_value=False),
+            mock.patch("provider_cli.sys.stdout.isatty", return_value=False),
+            mock.patch("provider_cli.list_provider_models", return_value=["gpt-5.1"]),
+        ):
+            model = resolve_model_for_run(
+                provider_id="omp",
+                cfg=cfg,
+                cli_override=None,
+            )
+        self.assertEqual(model, "claude-sonnet-4-5")
+
+    def test_resolve_model_interactive_choice(self):
+        cfg = ProjectConfig(agent_cli_model_omp="claude-sonnet-4-5")
+        with (
+            mock.patch("provider_cli.sys.stdin.isatty", return_value=True),
+            mock.patch("provider_cli.sys.stdout.isatty", return_value=True),
+            mock.patch("provider_cli.list_provider_models", return_value=["gpt-5.1"]),
+            mock.patch("builtins.input", return_value="2"),
+        ):
+            model = resolve_model_for_run(
+                provider_id="omp",
+                cfg=cfg,
+                cli_override=None,
+            )
+        self.assertEqual(model, "gpt-5.1")
+
+    def test_resolve_model_cli_override_wins(self):
+        cfg = ProjectConfig(agent_cli_model_omp="claude-sonnet-4-5")
+        model = resolve_model_for_run(
+            provider_id="omp",
+            cfg=cfg,
+            cli_override="my-custom-model",
+        )
+        self.assertEqual(model, "my-custom-model")
 
 
 if __name__ == "__main__":

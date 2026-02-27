@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -221,6 +222,133 @@ def _interactive_provider_choice() -> str:
         if choice in {"1", "2", "3", "4"}:
             return options[int(choice) - 1]
         print("Invalid selection. Choose 1, 2, 3, or 4.")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from terminal output."""
+    return re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", text)
+
+
+def _parse_models_from_output(output: str) -> list[str]:
+    """Extract likely model IDs from CLI output."""
+    models: list[str] = []
+    seen: set[str] = set()
+    for raw_line in _strip_ansi(output).splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        # Most CLIs print model IDs as the first column/token.
+        token = line.split()[0].strip(",")
+        lowered = token.lower()
+        if lowered in {"usage:", "error", "error:", "warning", "warning:", "commands:"}:
+            continue
+        if token.startswith(("-", "=", "#", "[")):
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]*", token):
+            continue
+        if "/" not in token and "-" not in token:
+            continue
+
+        if token not in seen:
+            seen.add(token)
+            models.append(token)
+    return models
+
+
+def list_provider_models(
+    provider_id: str,
+    cfg: ProjectConfig,
+    cwd: Optional[Path] = None,
+) -> list[str]:
+    """
+    Query a provider CLI for available models. Returns an empty list if unsupported.
+    """
+    provider_id = normalize_provider_id(provider_id)
+    binary = ensure_provider_binary_exists(provider_id, cfg)
+
+    if provider_id == "omp":
+        cmd = [binary, "--list-models"]
+    elif provider_id == "opencode":
+        cmd = [binary, "models"]
+    else:
+        # Claude/Codex do not expose a simple non-interactive model list command.
+        return []
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=str(cwd or Path.cwd()),
+    )
+    if result.returncode != 0 and not result.stdout.strip():
+        return []
+    return _parse_models_from_output(result.stdout)
+
+
+def _interactive_model_choice(
+    provider_id: str,
+    default_model: str,
+    discovered_models: list[str],
+) -> str:
+    """Prompt user to select a model, with optional discovered model choices."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return default_model
+
+    options: list[str] = []
+    seen: set[str] = set()
+    for value in [default_model, *discovered_models]:
+        model = value.strip()
+        if model and model not in seen:
+            seen.add(model)
+            options.append(model)
+
+    print(f"\nSelect model for provider '{provider_id}':")
+    if options:
+        for idx, value in enumerate(options, start=1):
+            marker = " (default)" if value == default_model else ""
+            print(f"  {idx}. {value}{marker}")
+        print("  m. Enter a custom model ID")
+    else:
+        print("  (No model list discovered. You can enter a custom model ID.)")
+
+    while True:
+        if options:
+            choice = input(f"Choose [Enter={default_model}]: ").strip()
+            if not choice:
+                return default_model
+            if choice.lower() == "m":
+                custom = input("Model ID: ").strip()
+                return custom or default_model
+            if choice.isdigit():
+                idx = int(choice)
+                if 1 <= idx <= len(options):
+                    return options[idx - 1]
+            # Allow direct model ID entry at the prompt.
+            return choice
+
+        custom = input(f"Model ID [Enter={default_model}]: ").strip()
+        return custom or default_model
+
+
+def resolve_model_for_run(
+    provider_id: str,
+    cfg: ProjectConfig,
+    cli_override: Optional[str],
+) -> str:
+    """
+    Resolve model for this run.
+    Priority: explicit --model > interactive pick (TTY) > provider default from config.
+    """
+    if cli_override and cli_override.strip():
+        return cli_override.strip()
+
+    default_model = provider_default_model(provider_id, cfg)
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return default_model
+
+    discovered = list_provider_models(provider_id, cfg)
+    return _interactive_model_choice(provider_id, default_model, discovered)
 
 
 def resolve_provider_for_run(

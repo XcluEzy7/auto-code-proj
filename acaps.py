@@ -27,7 +27,7 @@ from config import get_config, reload_config
 from configure import run_configure
 from provider_cli import (
     print_degraded_capability_warning,
-    provider_default_model,
+    resolve_model_for_run,
     resolve_provider_for_run,
 )
 from prompter import run_prompter
@@ -167,12 +167,19 @@ def main() -> None:
 
         print(f"Agent CLI provider: {provider_id}")
         print_degraded_capability_warning(provider_id, cfg)
+        model = resolve_model_for_run(
+            provider_id=provider_id,
+            cfg=cfg,
+            cli_override=args.model,
+        )
+        print(f"Selected model: {model}")
 
         # Step 0: Run prompt wizard if requested
         if args.prompt:
             success = await run_prompter(
                 prompt_files=args.prompt_files,
-                generation_model=args.model,
+                analysis_model=model,
+                generation_model=model,
                 overwrite=args.prompt_overwrite,
                 provider_id=provider_id,
             )
@@ -186,7 +193,7 @@ def main() -> None:
         # Step 1: Run configuration agent if requested
         if args.configure:
             await run_configure(
-                configure_model=args.configure_model,
+                configure_model=args.configure_model or model,
                 provider_id=provider_id,
             )
             # Reload config so the rest of the run uses freshly written .env
@@ -194,9 +201,6 @@ def main() -> None:
             print("Configuration loaded. Starting coding agents...\n")
         else:
             cfg = get_config()
-
-        # Step 2: Resolve model (CLI arg > .env > default)
-        model = args.model or provider_default_model(provider_id, cfg)
 
         # Step 3: Resolve project directory
         project_dir = args.project_dir
