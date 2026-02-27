@@ -114,4 +114,3 @@ class RunLogger:
                 handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
         except OSError:
             self._write_failed = True
-

@@ -30,6 +30,7 @@ DEFAULT_GENERATION_MODEL = "claude-sonnet-4-6"
 GENERATION_REQUIRED_KEYS = {"app_spec", "initializer_prompt", "coding_prompt"}
 StatusCallback = Callable[[str, str], None]
 StreamCallback = Callable[[str, str], None]
+MIN_ANALYSIS_QUESTIONS = get_config().min_analysis_questions
 AUTONOMY_OVERRIDE_BLOCK = """\
 ## Autonomous Execution Contract
 
@@ -67,6 +68,11 @@ Output ONLY a valid JSON object with these exact keys:
   - why: string (why this information is needed, e.g. "needed for choosing the right framework")
 
 Output ONLY the JSON object, starting with { and ending with }. No other text.
+"""
+
+STRICT_ANALYSIS_SUFFIX = f"""
+Return at least {MIN_ANALYSIS_QUESTIONS} clarifying questions unless the requirements are fully specified.
+If you cannot find gaps, emit a conservative assumption question so the list is never empty.
 """
 
 GENERATION_SYSTEM_PROMPT = """\
@@ -175,7 +181,7 @@ async def run_analysis_session(
     if status_callback:
         status_callback("analyze", "Identifying gaps and generating clarifying questions")
 
-    query = (
+    base_query = (
         "Please analyze the following requirements document and generate clarifying questions.\n\n"
         f"REQUIREMENTS DOCUMENT:\n{content}\n\n"
         "Output ONLY a valid JSON object as described in your instructions."
@@ -186,7 +192,7 @@ async def run_analysis_session(
         provider_id=provider_id,
         model=model,
         system_prompt=ANALYSIS_SYSTEM_PROMPT,
-        prompt=query,
+        prompt=base_query,
         cwd=Path.cwd(),
         cfg=cfg,
         allowed_tools="Edit,Bash,Task",
@@ -199,8 +205,39 @@ async def run_analysis_session(
 
     result_data = extract_json_from_text(result.stdout)
 
+    def _valid_questions(payload: dict) -> bool:
+        questions = payload.get("questions", [])
+        return isinstance(questions, list) and len(questions) >= MIN_ANALYSIS_QUESTIONS
+
+    if not _valid_questions(result_data):
+        strict_query = base_query + "\n\n" + STRICT_ANALYSIS_SUFFIX
+        if status_callback:
+            status_callback("analyze", "Analysis retry with strict JSON + min questions")
+        retry = run_prompt_task(
+            provider_id=provider_id,
+            model=model,
+            system_prompt=ANALYSIS_SYSTEM_PROMPT,
+            prompt=strict_query,
+            cwd=Path.cwd(),
+            cfg=cfg,
+            allowed_tools="Edit,Bash,Task",
+            stream_callback=stream_callback,
+        )
+        try:
+            retry_data = extract_json_from_text(retry.stdout)
+            if _valid_questions(retry_data):
+                result_data = retry_data
+        except Exception:
+            pass
+
+    questions = result_data.get("questions", [])
+    if not isinstance(questions, list) or len(questions) == 0:
+        result_data["qa_status"] = "empty"
+
     print(f"Analysis: {result_data.get('analysis', '?')}")
     print(f"Questions identified: {len(result_data.get('questions', []))}\n")
+    if result_data.get("qa_status") == "empty":
+        print("Warning: analysis returned zero clarifying questions; proceeding with warnings.\n")
 
     return result_data
 

@@ -121,6 +121,16 @@ def _parse_bool_env(value: str | None, default: bool) -> bool:
     return default
 
 
+def _parse_int_env(value: str | None, default: int) -> int:
+    """Parse integer env values with graceful fallback."""
+    if value is None:
+        return default
+    try:
+        return int(value.strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def _parse_stream_mode_env(value: str | None, default: str) -> str:
     """Parse stdout rendering mode env setting with safe fallback."""
     if value is None:
@@ -184,6 +194,7 @@ class ProjectConfig:
     agent_run_log_dir: str = "logs"
     agent_stream_stdout_mode: str = "assistant_text"
     agent_stream_show_thinking: bool = False
+    min_analysis_questions: int = 3
 
     @property
     def allowed_commands(self) -> set[str]:
@@ -334,6 +345,9 @@ def get_config() -> ProjectConfig:
         ),
         agent_stream_show_thinking=_parse_bool_env(
             os.environ.get("AGENT_STREAM_SHOW_THINKING"), False
+        ),
+        min_analysis_questions=_parse_int_env(
+            os.environ.get("MIN_ANALYSIS_QUESTIONS"), 3
         ),
     )
 

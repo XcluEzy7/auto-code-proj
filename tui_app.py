@@ -587,11 +587,15 @@ class AcapTuiApp(App[list[str] | None]):
                 if q.get("question")
             ]
 
+            qa_empty = analysis_result.get("qa_status") == "empty"
+
             if questions:
                 self.call_from_thread(self._set_phase, PromptFlowPhase.QA, "running", f"Questions found: {len(questions)}")
                 self.call_from_thread(self._show_questionnaire, questions)
             else:
-                self.call_from_thread(self._set_phase, PromptFlowPhase.QA, "done", "No clarifying questions")
+                state = "warn" if qa_empty else "done"
+                msg = "Analysis returned 0 questions; proceeding" if qa_empty else "No clarifying questions"
+                self.call_from_thread(self._set_phase, PromptFlowPhase.QA, state, msg)
                 self.run_generation_worker()
         except Exception as exc:
             self.call_from_thread(self._set_status, f"Error: {exc}")

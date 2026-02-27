@@ -519,6 +519,7 @@ def run_prompt_task(
     caps = CAPABILITIES[provider_id]
     require_json = cfg.agent_cli_require_json_output
     non_interactive = cfg.agent_cli_non_interactive
+    require_json = cfg.agent_cli_require_json_output
 
     if provider_id == "claude":
         cmd = [

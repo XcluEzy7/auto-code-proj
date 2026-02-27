@@ -15,6 +15,9 @@ class PromptFlowPhase(str, Enum):
     HANDOFF = "handoff"
 
 
+PHASE_STATUSES = {"queued", "running", "done", "warn"}
+
+
 @dataclass
 class PhaseState:
     """Runtime state for a phase."""

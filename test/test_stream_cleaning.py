@@ -15,6 +15,14 @@ class TestStreamCleaner(unittest.TestCase):
         )
         self.assertEqual(cleaner.ingest("omp", "stdout", raw), [])
 
+    def test_omp_assistant_text_keeps_thinking_when_enabled(self):
+        cleaner = StreamCleaner(mode="assistant_text", show_thinking=True)
+        raw = (
+            '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta",'
+            '"delta":"internal"},"message":{"role":"assistant"}}'
+        )
+        self.assertEqual(cleaner.ingest("omp", "stdout", raw), ["[thinking] internal"])
+
     def test_omp_assistant_text_emits_text_delta(self):
         cleaner = StreamCleaner(mode="assistant_text", show_thinking=False)
         raw = (
