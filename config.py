@@ -166,6 +166,10 @@ class ProjectConfig:
     agent_cli_model_opencode: str = "claude-sonnet-4-5"
     agent_cli_warn_on_degraded_caps: bool = True
     agent_cli_require_json_output: bool = True
+    agent_cli_non_interactive: bool = True
+    agent_cli_auto_approve_fallback: bool = True
+    agent_cli_dangerous_fallback: bool = True
+    prompt_autonomy_override: bool = True
 
     @property
     def allowed_commands(self) -> set[str]:
@@ -294,6 +298,18 @@ def get_config() -> ProjectConfig:
         ),
         agent_cli_require_json_output=_parse_bool_env(
             os.environ.get("AGENT_CLI_REQUIRE_JSON_OUTPUT"), True
+        ),
+        agent_cli_non_interactive=_parse_bool_env(
+            os.environ.get("AGENT_CLI_NON_INTERACTIVE"), True
+        ),
+        agent_cli_auto_approve_fallback=_parse_bool_env(
+            os.environ.get("AGENT_CLI_AUTO_APPROVE_FALLBACK"), True
+        ),
+        agent_cli_dangerous_fallback=_parse_bool_env(
+            os.environ.get("AGENT_CLI_DANGEROUS_FALLBACK"), True
+        ),
+        prompt_autonomy_override=_parse_bool_env(
+            os.environ.get("PROMPT_AUTONOMY_OVERRIDE"), True
         ),
     )
 

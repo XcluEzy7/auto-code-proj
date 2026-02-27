@@ -81,6 +81,44 @@ INSTALL_HINTS: dict[str, str] = {
 
 
 StreamCallback = Callable[[str, str], None]
+BLOCKING_PATTERNS: tuple[str, ...] = (
+    "approval",
+    "confirm",
+    "interactive",
+    "requires user input",
+    "press enter",
+    "prompt",
+)
+
+
+def _looks_blocked(result: subprocess.CompletedProcess[str]) -> bool:
+    """Heuristic for approval/interactive stalls in non-interactive runs."""
+    text = f"{result.stdout}\n{result.stderr}".lower()
+    if result.returncode == 0:
+        return False
+    return any(pattern in text for pattern in BLOCKING_PATTERNS)
+
+
+def _execute_command(
+    cmd: list[str],
+    cwd: Path,
+    input_text: str | None,
+    stream_callback: StreamCallback | None,
+) -> subprocess.CompletedProcess[str]:
+    if stream_callback is None:
+        return subprocess.run(
+            cmd,
+            input=input_text,
+            capture_output=True,
+            text=True,
+            cwd=str(cwd),
+        )
+    return _run_command_with_streaming(
+        cmd=cmd,
+        cwd=cwd,
+        input_text=input_text,
+        on_stream=stream_callback,
+    )
 
 
 def _run_command_with_streaming(
@@ -480,6 +518,7 @@ def run_prompt_task(
     binary = ensure_provider_binary_exists(provider_id, cfg)
     caps = CAPABILITIES[provider_id]
     require_json = cfg.agent_cli_require_json_output
+    non_interactive = cfg.agent_cli_non_interactive
 
     if provider_id == "claude":
         cmd = [
@@ -492,19 +531,11 @@ def run_prompt_task(
             "--system-prompt",
             system_prompt,
         ]
-        if stream_callback is None:
-            return subprocess.run(
-                cmd,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                cwd=str(cwd),
-            )
-        return _run_command_with_streaming(
+        return _execute_command(
             cmd=cmd,
             cwd=cwd,
             input_text=prompt,
-            on_stream=stream_callback,
+            stream_callback=stream_callback,
         )
 
     query = prompt
@@ -524,27 +555,46 @@ def run_prompt_task(
         )
 
     if provider_id == "codex":
-        cmd = [binary, "exec", "--model", model, query]
+        cmd = [binary, "exec", "--model", model]
+        if non_interactive:
+            cmd.append("--full-auto")
+        cmd.append(query)
     elif provider_id == "omp":
         cmd = [binary, "-p", query, "--model", model, "--mode", "json"]
         if caps.supports_native_system_prompt:
             cmd.extend(["--system-prompt", system_prompt])
     else:
-        cmd = [binary, "run", query, "--model", model, "--format", "json"]
+        cmd = [binary, "run", "--model", model, "--prompt", query]
 
-    if stream_callback is None:
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=str(cwd),
-        )
-
-    return _run_command_with_streaming(
+    result = _execute_command(
         cmd=cmd,
         cwd=cwd,
-        on_stream=stream_callback,
+        input_text=None,
+        stream_callback=stream_callback,
     )
+    if (
+        provider_id == "codex"
+        and non_interactive
+        and cfg.agent_cli_dangerous_fallback
+        and cfg.agent_cli_auto_approve_fallback
+        and _looks_blocked(result)
+    ):
+        fallback_cmd = [
+            binary,
+            "exec",
+            "--model",
+            model,
+            "--dangerously-bypass-approvals-and-sandbox",
+            query,
+        ]
+        print("[Warning] Codex approval blocked; retrying with dangerous non-interactive fallback.")
+        return _execute_command(
+            cmd=fallback_cmd,
+            cwd=cwd,
+            input_text=None,
+            stream_callback=stream_callback,
+        )
+    return result
 
 
 def run_agent_task(
@@ -561,6 +611,7 @@ def run_agent_task(
     """
     provider_id = normalize_provider_id(provider_id)
     binary = ensure_provider_binary_exists(provider_id, cfg)
+    non_interactive = cfg.agent_cli_non_interactive
 
     if provider_id == "claude":
         if settings_file is None:
@@ -590,17 +641,45 @@ def run_agent_task(
     )
 
     if provider_id == "codex":
-        cmd = [binary, "exec", "--model", model, query]
+        cmd = [binary, "exec", "--model", model]
+        if non_interactive:
+            cmd.append("--full-auto")
+        cmd.append(query)
     elif provider_id == "omp":
         cmd = [binary, "-p", query, "--model", model]
+        if non_interactive:
+            cmd.append("--no-pty")
         if CAPABILITIES["omp"].supports_native_append_system_prompt:
             cmd.extend(["--append-system-prompt", system_prompt])
     else:
-        cmd = [binary, "run", query, "--model", model]
+        cmd = [binary, "run", "--model", model, "--prompt", query]
 
-    return subprocess.run(
+    result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         cwd=str(cwd),
     )
+    if (
+        provider_id == "codex"
+        and non_interactive
+        and cfg.agent_cli_dangerous_fallback
+        and cfg.agent_cli_auto_approve_fallback
+        and _looks_blocked(result)
+    ):
+        fallback_cmd = [
+            binary,
+            "exec",
+            "--model",
+            model,
+            "--dangerously-bypass-approvals-and-sandbox",
+            query,
+        ]
+        print("[Warning] Codex approval blocked; retrying with dangerous non-interactive fallback.")
+        return subprocess.run(
+            fallback_cmd,
+            capture_output=True,
+            text=True,
+            cwd=str(cwd),
+        )
+    return result

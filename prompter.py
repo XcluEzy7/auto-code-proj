@@ -30,6 +30,14 @@ DEFAULT_GENERATION_MODEL = "claude-sonnet-4-6"
 GENERATION_REQUIRED_KEYS = {"app_spec", "initializer_prompt", "coding_prompt"}
 StatusCallback = Callable[[str, str], None]
 StreamCallback = Callable[[str, str], None]
+AUTONOMY_OVERRIDE_BLOCK = """\
+## Autonomous Execution Contract
+
+- Run in fully autonomous mode without pausing for human confirmation.
+- If a workflow suggests brainstorming/approval checkpoints, continue with bounded assumptions.
+- Record key assumptions in output and keep moving.
+- Never block waiting for user input once execution has started.
+"""
 
 ANALYSIS_SYSTEM_PROMPT = """\
 You are a technical architect analyzing product requirements documents.
@@ -238,11 +246,28 @@ def conduct_qa(questions: list[dict], answers: list[str] | None = None) -> list[
 
 
 def _load_template(filename: str) -> str:
-    """Load a template file from the prompts/ directory alongside this script."""
-    template_path = Path(__file__).parent / "prompts" / filename
-    if template_path.exists():
-        return template_path.read_text(encoding="utf-8")
+    """Load a template file from prompts/, preferring *-template variants."""
+    prompts_dir = Path(__file__).parent / "prompts"
+    preferred = prompts_dir / filename
+    if preferred.exists():
+        return preferred.read_text(encoding="utf-8")
+
+    if "." in filename:
+        base, ext = filename.rsplit(".", 1)
+        template_variant = prompts_dir / f"{base}-template.{ext}"
+        if template_variant.exists():
+            return template_variant.read_text(encoding="utf-8")
     return ""
+
+
+def apply_autonomy_override(text: str, enabled: bool = True) -> str:
+    """Append autonomy constraints once to prevent blocking workflow prompts."""
+    if not enabled:
+        return text
+    marker = "## Autonomous Execution Contract"
+    if marker in text:
+        return text
+    return text.rstrip() + "\n\n" + AUTONOMY_OVERRIDE_BLOCK.strip() + "\n"
 
 
 async def run_generation_session(
@@ -273,8 +298,9 @@ async def run_generation_session(
         status_callback("generate", "Generating app_spec.txt, initializer_prompt.md, coding_prompt.md")
 
     # Load template examples from the existing prompts/ directory
-    initializer_template = _load_template("initializer_prompt.md")
-    coding_template = _load_template("coding_prompt.md")
+    app_spec_template = _load_template("app_spec-template.txt")
+    initializer_template = _load_template("initializer_prompt-template.md")
+    coding_template = _load_template("coding_prompt-template.md")
 
     # Build Q&A section (only include answered questions)
     qa_section = ""
@@ -288,6 +314,10 @@ async def run_generation_session(
 
     # Build template section
     template_section = ""
+    if app_spec_template:
+        template_section += (
+            f"\n\n=== TEMPLATE: app_spec.txt ===\n{app_spec_template}"
+        )
     if initializer_template:
         template_section += (
             f"\n\n=== TEMPLATE: initializer_prompt.md ===\n{initializer_template}"
@@ -410,8 +440,14 @@ def write_prompt_files(
 
     files = {
         "app_spec.txt": generated.get("app_spec", ""),
-        "initializer_prompt.md": generated.get("initializer_prompt", ""),
-        "coding_prompt.md": generated.get("coding_prompt", ""),
+        "initializer_prompt.md": apply_autonomy_override(
+            generated.get("initializer_prompt", ""),
+            enabled=get_config().prompt_autonomy_override,
+        ),
+        "coding_prompt.md": apply_autonomy_override(
+            generated.get("coding_prompt", ""),
+            enabled=get_config().prompt_autonomy_override,
+        ),
     }
 
     for filename, file_content in files.items():

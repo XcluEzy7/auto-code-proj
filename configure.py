@@ -283,6 +283,10 @@ def write_env_file(config_data: dict, env_path: Path | None = None) -> Path:
         f"AGENT_CLI_MODEL_OPENCODE={os.environ.get('AGENT_CLI_MODEL_OPENCODE', 'claude-sonnet-4-5')}",
         f"AGENT_CLI_WARN_ON_DEGRADED_CAPS={os.environ.get('AGENT_CLI_WARN_ON_DEGRADED_CAPS', 'true')}",
         f"AGENT_CLI_REQUIRE_JSON_OUTPUT={os.environ.get('AGENT_CLI_REQUIRE_JSON_OUTPUT', 'true')}",
+        f"AGENT_CLI_NON_INTERACTIVE={os.environ.get('AGENT_CLI_NON_INTERACTIVE', 'true')}",
+        f"AGENT_CLI_AUTO_APPROVE_FALLBACK={os.environ.get('AGENT_CLI_AUTO_APPROVE_FALLBACK', 'true')}",
+        f"AGENT_CLI_DANGEROUS_FALLBACK={os.environ.get('AGENT_CLI_DANGEROUS_FALLBACK', 'true')}",
+        f"PROMPT_AUTONOMY_OVERRIDE={os.environ.get('PROMPT_AUTONOMY_OVERRIDE', 'true')}",
         "",
     ]
 

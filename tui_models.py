@@ -33,3 +33,12 @@ class FlowState:
     current_phase: PromptFlowPhase = PromptFlowPhase.ANALYZE
     stream_mode: bool = False
     logs: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ClarifyingQuestion:
+    """A single clarifying question and user answer."""
+
+    question: str
+    why: str = ""
+    answer: str = ""

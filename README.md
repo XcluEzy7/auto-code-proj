@@ -181,9 +181,13 @@ uv run python3 tui_app.py \
 Inside the TUI:
 - `Up/Down` + `Enter` navigate menus
 - `E` toggles field editing mode
+- `N` / `P` move between refinement questions
+- `S` submits the questionnaire and continues generation
 - `L` toggles phase view vs streaming output log pane
 - `H` hands off to the coding agent command after prep completes
 - `Q` quits
+
+If `--prompt-files` are provided, the requirements textbox is hidden and those files are treated as source of truth. The TUI then focuses on clarifying question refinement.
 
 The TUI is additive: existing `acaps.py --prompt`, `--configure`, and full-run CLI flows remain unchanged.
 
@@ -200,6 +204,11 @@ This is the starting point. Give it your requirements document and it spits out 
 3. **Q&A** - you answer the questions in the terminal (just hit Enter to skip any)
 4. **Generate** - a second AI pass writes all three files based on your answers
 5. **Write** - saves `prompts/app_spec.txt`, `prompts/initializer_prompt.md`, and `prompts/coding_prompt.md`
+
+Prompt generation now prefers structured templates when present:
+- `prompts/app_spec-template.txt`
+- `prompts/initializer_prompt-template.md`
+- `prompts/coding_prompt-template.md`
 
 If you want to redo this and replace files that already exist, add `--prompt-overwrite`.
 

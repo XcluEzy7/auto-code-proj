@@ -1,0 +1,61 @@
+<project_specification>
+  <project_name>{{PROJECT_NAME}}</project_name>
+  <summary>{{ONE_PARAGRAPH_PRODUCT_SUMMARY}}</summary>
+
+  <goals>
+    <goal>{{PRIMARY_GOAL_1}}</goal>
+    <goal>{{PRIMARY_GOAL_2}}</goal>
+  </goals>
+
+  <non_goals>
+    <non_goal>{{OUT_OF_SCOPE_1}}</non_goal>
+  </non_goals>
+
+  <users>
+    <persona>{{PRIMARY_USER_PERSONA}}</persona>
+  </users>
+
+  <tech_stack>
+    <frontend>{{FRONTEND_STACK}}</frontend>
+    <backend>{{BACKEND_STACK}}</backend>
+    <database>{{DATABASE}}</database>
+    <deployment>{{DEPLOY_TARGET}}</deployment>
+  </tech_stack>
+
+  <features>
+    <feature id="F1">
+      <name>{{FEATURE_NAME}}</name>
+      <description>{{FEATURE_DESCRIPTION}}</description>
+      <acceptance_criteria>
+        <criterion>{{CRITERION_1}}</criterion>
+        <criterion>{{CRITERION_2}}</criterion>
+      </acceptance_criteria>
+    </feature>
+  </features>
+
+  <api>
+    <endpoint method="GET" path="{{PATH_1}}">{{PURPOSE_1}}</endpoint>
+    <endpoint method="POST" path="{{PATH_2}}">{{PURPOSE_2}}</endpoint>
+  </api>
+
+  <data_model>
+    <entity name="{{ENTITY_1}}">
+      <field name="id" type="{{TYPE}}" />
+      <field name="{{FIELD_1}}" type="{{TYPE}}" />
+    </entity>
+  </data_model>
+
+  <ui>
+    <screen>{{SCREEN_1}}</screen>
+    <screen>{{SCREEN_2}}</screen>
+  </ui>
+
+  <constraints>
+    <constraint>{{CONSTRAINT_1}}</constraint>
+  </constraints>
+
+  <milestones>
+    <milestone>{{MILESTONE_1}}</milestone>
+    <milestone>{{MILESTONE_2}}</milestone>
+  </milestones>
+</project_specification>

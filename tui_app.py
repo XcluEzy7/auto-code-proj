@@ -8,18 +8,18 @@ import asyncio
 import subprocess
 from pathlib import Path
 
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual import work
 from textual.widgets import Footer, Header, Input, RichLog, Static
 
 from config import get_config
 from configure import run_configure
-from prompter import run_analysis_session, run_generation_session, write_prompt_files
+from prompter import collect_source_documents, run_analysis_session, run_generation_session, write_prompt_files
 from provider_cli import provider_default_model
-from tui_models import PromptFlowPhase
+from tui_models import ClarifyingQuestion, PromptFlowPhase
 from tui_services import build_handoff_command, compute_flow_completion, default_project_dir
 from tui_widgets import ArcadeProgress
 
@@ -55,9 +55,21 @@ class AcapTuiApp(App[list[str] | None]):
       height: 4;
       margin-bottom: 1;
     }
+    .hidden {
+      display: none;
+    }
     #req_input {
-      height: 8;
+      height: 6;
       margin-bottom: 1;
+    }
+    #qa_box {
+      border: round #ccc;
+      padding: 1;
+      margin-bottom: 1;
+      height: 10;
+    }
+    #qa_answer {
+      margin-top: 1;
     }
     #logs.hidden {
       display: none;
@@ -71,8 +83,11 @@ class AcapTuiApp(App[list[str] | None]):
     BINDINGS = [
         Binding("up", "menu_up", "Up", priority=True),
         Binding("down", "menu_down", "Down", priority=True),
-        Binding("enter", "menu_select", "Select", priority=True),
+        Binding("enter", "menu_select", "Select/Save", priority=True),
         Binding("e", "toggle_edit_mode", "Edit Fields", priority=True),
+        Binding("n", "qa_next", "Next Q", priority=True),
+        Binding("p", "qa_prev", "Prev Q", priority=True),
+        Binding("s", "qa_submit", "Submit Q&A", priority=True),
         Binding("l", "toggle_logs", "Toggle Logs"),
         Binding("h", "handoff", "Handoff"),
         Binding("q", "quit", "Quit"),
@@ -92,9 +107,19 @@ class AcapTuiApp(App[list[str] | None]):
         super().__init__()
         self.args = args
         self.cfg = get_config()
-        self.flow_mode: str | None = None
         self.handoff_command: list[str] | None = None
         self.edit_mode: bool = False
+
+        self.pending_content: str | None = None
+        self.pending_provider: str | None = None
+        self.pending_model: str | None = None
+        self.pending_project_dir: Path | None = None
+        self.pending_include_configure: bool = False
+
+        self.qa_mode: bool = False
+        self.questions: list[ClarifyingQuestion] = []
+        self.qa_index: int = 0
+
         self.phase_state: dict[PromptFlowPhase, str] = {
             PromptFlowPhase.ANALYZE: "queued",
             PromptFlowPhase.QA: "queued",
@@ -136,15 +161,15 @@ class AcapTuiApp(App[list[str] | None]):
                     self.args.agent_cli or self.cfg.agent_cli_id,
                     self.cfg,
                 )
+                yield Input(value=default_model, placeholder="Model", id="model_id")
                 yield Input(
-                    value=default_model,
-                    placeholder="Model",
-                    id="model_id",
-                )
-                yield Input(
-                    placeholder="Paste requirements text here (optional; file input wins)",
+                    placeholder="Paste requirements text here (disabled when prompt files are set)",
                     id="req_input",
                 )
+                with Vertical(id="qa_box"):
+                    yield Static("", id="qa_title")
+                    yield Static("", id="qa_why")
+                    yield Input(placeholder="Type answer and press Enter to save", id="qa_answer")
                 log = RichLog(id="logs")
                 log.add_class("hidden")
                 yield log
@@ -154,12 +179,37 @@ class AcapTuiApp(App[list[str] | None]):
         self._render_menu()
         self._render_timeline()
         self._set_inputs_enabled(False)
+        self.query_one("#qa_box", Vertical).add_class("hidden")
+        self._refresh_source_mode()
         self.set_interval(0.7, self._pulse_arcade)
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "prompt_files":
+            self._refresh_source_mode()
+
+    def _refresh_source_mode(self) -> None:
+        prompt_files = self.query_one("#prompt_files", Input).value.strip()
+        req_input = self.query_one("#req_input", Input)
+        if prompt_files:
+            req_input.value = ""
+            req_input.add_class("hidden")
+            req_input.disabled = True
+            self._set_status("Using PRD files as source-of-truth. Questionnaire will refine details.")
+        else:
+            req_input.remove_class("hidden")
+            req_input.disabled = not self.edit_mode
+
     def _set_inputs_enabled(self, enabled: bool) -> None:
-        for widget_id in ("#prompt_files", "#project_dir", "#provider_id", "#model_id", "#req_input"):
+        for widget_id in ("#prompt_files", "#project_dir", "#provider_id", "#model_id"):
             input_widget = self.query_one(widget_id, Input)
             input_widget.disabled = not enabled
+
+        req_input = self.query_one("#req_input", Input)
+        if self.query_one("#prompt_files", Input).value.strip():
+            req_input.disabled = True
+        else:
+            req_input.disabled = not enabled
+
         if enabled:
             self.set_focus(self.query_one("#prompt_files", Input))
         else:
@@ -179,8 +229,7 @@ class AcapTuiApp(App[list[str] | None]):
     def _render_timeline(self) -> None:
         lines = ["[b]Phases[/b]"]
         for phase in PromptFlowPhase:
-            state = self.phase_state[phase]
-            lines.append(f"{phase.value.upper():<10} {state}")
+            lines.append(f"{phase.value.upper():<10} {self.phase_state[phase]}")
         self.query_one("#timeline", Static).update("\n".join(lines))
 
     def _set_status(self, text: str) -> None:
@@ -192,8 +241,7 @@ class AcapTuiApp(App[list[str] | None]):
     def _set_phase(self, phase: PromptFlowPhase, state: str, message: str = "") -> None:
         self.phase_state[phase] = state
         self._render_timeline()
-        progress = compute_flow_completion(phase)
-        self.query_one("#arcade", ArcadeProgress).set_progress(progress)
+        self.query_one("#arcade", ArcadeProgress).set_progress(compute_flow_completion(phase))
         if message:
             self._set_status(message)
         if state == "done":
@@ -213,33 +261,116 @@ class AcapTuiApp(App[list[str] | None]):
         if phase is not None:
             self.call_from_thread(self._set_phase, phase, "running", message)
 
+    def _resolve_inputs(self) -> tuple[list[str], str, str, str, Path]:
+        file_input = self.query_one("#prompt_files", Input).value.strip()
+        prompt_files = file_input.split() if file_input else []
+        source_content = self.query_one("#req_input", Input).value.strip()
+        provider = self.query_one("#provider_id", Input).value.strip() or self.cfg.agent_cli_id
+        model = self.query_one("#model_id", Input).value.strip() or provider_default_model(provider, self.cfg)
+        project_dir_raw = self.query_one("#project_dir", Input).value.strip()
+        project_dir = Path(project_dir_raw) if project_dir_raw else default_project_dir()
+        return prompt_files, source_content, provider, model, project_dir
+
+    def _show_questionnaire(self, questions: list[ClarifyingQuestion]) -> None:
+        self.questions = questions
+        self.qa_index = 0
+        self.qa_mode = True
+        self.query_one("#qa_box", Vertical).remove_class("hidden")
+        self.query_one("#qa_answer", Input).disabled = False
+        self._update_questionnaire_view()
+        self.set_focus(self.query_one("#qa_answer", Input))
+        self._set_status("Answer clarifying questions. Enter saves, N/P navigate, S submits.")
+
+    def _hide_questionnaire(self) -> None:
+        self.qa_mode = False
+        self.query_one("#qa_box", Vertical).add_class("hidden")
+        self.query_one("#qa_answer", Input).disabled = True
+
+    def _update_questionnaire_view(self) -> None:
+        if not self.questions:
+            self._hide_questionnaire()
+            return
+        current = self.questions[self.qa_index]
+        self.query_one("#qa_title", Static).update(
+            f"Q{self.qa_index + 1}/{len(self.questions)}: {current.question}"
+        )
+        self.query_one("#qa_why", Static).update(f"Why: {current.why}" if current.why else "")
+        self.query_one("#qa_answer", Input).value = current.answer
+
+    def _save_current_answer(self) -> None:
+        if not self.qa_mode or not self.questions:
+            return
+        answer = self.query_one("#qa_answer", Input).value.strip()
+        self.questions[self.qa_index].answer = answer
+
     def action_menu_up(self) -> None:
+        if self.qa_mode:
+            return
         self.selected_index = (self.selected_index - 1) % len(self.MENU_ITEMS)
         self._render_menu()
 
     def action_menu_down(self) -> None:
+        if self.qa_mode:
+            return
         self.selected_index = (self.selected_index + 1) % len(self.MENU_ITEMS)
         self._render_menu()
 
     def action_menu_select(self) -> None:
+        if self.qa_mode:
+            self._save_current_answer()
+            self.action_qa_next()
+            return
+
         if self.edit_mode:
             self._set_status("Exit edit mode with E before selecting a menu action")
             return
+
         choice = self.MENU_ITEMS[self.selected_index]
         if choice == "Quit":
             self.exit(None)
             return
         if choice == "Start End-to-End Prep":
-            self.flow_mode = "end_to_end"
             self.run_flow_worker(include_configure=True)
             return
         if choice == "Prompt Wizard Only":
-            self.flow_mode = "prompt_only"
             self.run_flow_worker(include_configure=False)
             return
         if choice == "Configure Only":
-            self.flow_mode = "configure_only"
             self.run_configure_worker()
+
+    def action_toggle_edit_mode(self) -> None:
+        if self.qa_mode:
+            self._set_status("Questionnaire is active. Finish Q&A before editing source fields.")
+            return
+        self.edit_mode = not self.edit_mode
+        self._set_inputs_enabled(self.edit_mode)
+        if self.edit_mode:
+            self._set_status("Edit mode enabled: type in fields. Press E to return to menu mode.")
+        else:
+            self._set_status("Menu mode enabled: use arrows + Enter to select workflow.")
+
+    def action_qa_next(self) -> None:
+        if not self.qa_mode or not self.questions:
+            return
+        self._save_current_answer()
+        self.qa_index = min(self.qa_index + 1, len(self.questions) - 1)
+        self._update_questionnaire_view()
+
+    def action_qa_prev(self) -> None:
+        if not self.qa_mode or not self.questions:
+            return
+        self._save_current_answer()
+        self.qa_index = max(self.qa_index - 1, 0)
+        self._update_questionnaire_view()
+
+    def action_qa_submit(self) -> None:
+        if not self.qa_mode:
+            self._set_status("No active questionnaire to submit")
+            return
+        self._save_current_answer()
+        self._hide_questionnaire()
+        self._set_phase(PromptFlowPhase.QA, "done", "Q&A completed. Generating prompts...")
+        self.run_generation_worker()
 
     def action_toggle_logs(self) -> None:
         log = self.query_one("#logs", RichLog)
@@ -256,24 +387,6 @@ class AcapTuiApp(App[list[str] | None]):
             return
         self.exit(self.handoff_command)
 
-    def action_toggle_edit_mode(self) -> None:
-        self.edit_mode = not self.edit_mode
-        self._set_inputs_enabled(self.edit_mode)
-        if self.edit_mode:
-            self._set_status("Edit mode enabled: type in fields. Press E to return to menu mode.")
-        else:
-            self._set_status("Menu mode enabled: use arrows + Enter to select workflow.")
-
-    def _resolve_inputs(self) -> tuple[list[str], str, str, str, Path]:
-        file_input = self.query_one("#prompt_files", Input).value.strip()
-        prompt_files = file_input.split() if file_input else []
-        source_content = self.query_one("#req_input", Input).value.strip()
-        provider = self.query_one("#provider_id", Input).value.strip() or self.cfg.agent_cli_id
-        model = self.query_one("#model_id", Input).value.strip() or provider_default_model(provider, self.cfg)
-        project_dir_raw = self.query_one("#project_dir", Input).value.strip()
-        project_dir = Path(project_dir_raw) if project_dir_raw else default_project_dir()
-        return prompt_files, source_content, provider, model, project_dir
-
     @work(thread=True, exclusive=True)
     def run_flow_worker(self, include_configure: bool) -> None:
         prompt_files, source_content, provider, model, project_dir = self._resolve_inputs()
@@ -282,10 +395,18 @@ class AcapTuiApp(App[list[str] | None]):
                 self.call_from_thread(self._set_status, "Provide prompt files or requirements text")
                 return
 
-            from prompter import collect_source_documents
+            if prompt_files:
+                content = collect_source_documents(prompt_files)
+            else:
+                content = source_content
+
+            self.pending_content = content
+            self.pending_provider = provider
+            self.pending_model = model
+            self.pending_project_dir = project_dir
+            self.pending_include_configure = include_configure
 
             self.call_from_thread(self._set_phase, PromptFlowPhase.ANALYZE, "running", "Analyzing requirements")
-            content = source_content or collect_source_documents(prompt_files)
             analysis_result = asyncio.run(
                 run_analysis_session(
                     content=content,
@@ -297,23 +418,45 @@ class AcapTuiApp(App[list[str] | None]):
             )
             self.call_from_thread(self._set_phase, PromptFlowPhase.ANALYZE, "done", "Analysis complete")
 
-            questions = analysis_result.get("questions", [])
-            self.call_from_thread(self._set_phase, PromptFlowPhase.QA, "running", f"Questions found: {len(questions)}")
-            qa_pairs = []
-            for q in questions:
-                question = q.get("question", "")
-                why = q.get("why", "")
-                self.call_from_thread(self._append_log, f"[qa] {question} ({why})")
-                qa_pairs.append({"question": question, "answer": ""})
-            self.call_from_thread(self._set_phase, PromptFlowPhase.QA, "done", "Q&A step complete (blank answers by default)")
+            questions = [
+                ClarifyingQuestion(
+                    question=q.get("question", ""),
+                    why=q.get("why", ""),
+                )
+                for q in analysis_result.get("questions", [])
+                if q.get("question")
+            ]
+
+            if questions:
+                self.call_from_thread(self._set_phase, PromptFlowPhase.QA, "running", f"Questions found: {len(questions)}")
+                self.call_from_thread(self._show_questionnaire, questions)
+            else:
+                self.call_from_thread(self._set_phase, PromptFlowPhase.QA, "done", "No clarifying questions")
+                self.run_generation_worker()
+        except Exception as exc:
+            self.call_from_thread(self._set_status, f"Error: {exc}")
+            self.call_from_thread(self._append_log, f"[error] {exc}")
+
+    @work(thread=True, exclusive=True)
+    def run_generation_worker(self) -> None:
+        try:
+            if not self.pending_content or not self.pending_provider or not self.pending_model:
+                self.call_from_thread(self._set_status, "Missing flow context for generation")
+                return
+
+            qa_pairs = [
+                {"question": q.question, "answer": q.answer}
+                for q in self.questions
+                if q.answer
+            ]
 
             self.call_from_thread(self._set_phase, PromptFlowPhase.GENERATE, "running", "Generating prompts")
             generated = asyncio.run(
                 run_generation_session(
-                    content=content,
+                    content=self.pending_content,
                     qa_pairs=qa_pairs,
-                    model=model,
-                    provider_id=provider,
+                    model=self.pending_model,
+                    provider_id=self.pending_provider,
                     status_callback=self._status_cb,
                     stream_callback=self._stream_cb,
                 )
@@ -329,19 +472,24 @@ class AcapTuiApp(App[list[str] | None]):
             )
             self.call_from_thread(self._set_phase, PromptFlowPhase.WRITE, "done", "Prompt files written")
 
-            if include_configure:
+            if self.pending_include_configure:
                 self.call_from_thread(self._set_phase, PromptFlowPhase.CONFIGURE, "running", "Detecting stack")
                 asyncio.run(
                     run_configure(
-                        configure_model=model,
-                        provider_id=provider,
+                        configure_model=self.pending_model,
+                        provider_id=self.pending_provider,
                         status_callback=self._status_cb,
                         stream_callback=self._stream_cb,
                     )
                 )
                 self.call_from_thread(self._set_phase, PromptFlowPhase.CONFIGURE, "done", "Configuration complete")
 
-            cmd = build_handoff_command(project_dir=project_dir, provider_id=provider, model=model)
+            project_dir = self.pending_project_dir or default_project_dir()
+            cmd = build_handoff_command(
+                project_dir=project_dir,
+                provider_id=self.pending_provider,
+                model=self.pending_model,
+            )
             self.handoff_command = cmd
             self.call_from_thread(self._set_phase, PromptFlowPhase.HANDOFF, "done", "Press H to hand off to native coding agent TUI")
             self.call_from_thread(self._append_log, "[handoff] " + " ".join(cmd))
