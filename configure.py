@@ -208,13 +208,6 @@ async def run_configure(
     Returns:
         Dict of detected configuration values.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "ANTHROPIC_API_KEY environment variable not set.\n"
-            "Get your API key from: https://console.anthropic.com/"
-        )
-
     # Resolve model: argument > env var > default
     if configure_model is None:
         configure_model = os.environ.get(

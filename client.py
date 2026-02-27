@@ -6,7 +6,6 @@ Functions for creating and configuring the Claude Agent SDK client.
 """
 
 import json
-import os
 from pathlib import Path
 
 from claude_code_sdk import ClaudeCodeOptions, ClaudeSDKClient
@@ -56,13 +55,6 @@ def create_client(project_dir: Path, model: str) -> ClaudeSDKClient:
        (see security.py; allowlist derived from config.py)
     """
     cfg = get_config()
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "ANTHROPIC_API_KEY environment variable not set.\n"
-            "Get your API key from: https://console.anthropic.com/"
-        )
-
     # Create comprehensive security settings
     # Note: Using relative paths ("./**") restricts access to project directory
     # since cwd is set to project_dir

@@ -17,7 +17,6 @@ Or standalone:
 """
 
 import asyncio
-import os
 from pathlib import Path
 
 from claude_code_sdk import ClaudeCodeOptions, ClaudeSDKClient
@@ -146,13 +145,6 @@ async def run_analysis_session(content: str, model: str) -> dict:
     print(f"Model: {model}")
     print("Identifying gaps and generating clarifying questions...\n")
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "ANTHROPIC_API_KEY environment variable not set.\n"
-            "Get your API key from: https://console.anthropic.com/"
-        )
-
     query = (
         "Please analyze the following requirements document and generate clarifying questions.\n\n"
         f"REQUIREMENTS DOCUMENT:\n{content}\n\n"
@@ -252,13 +244,6 @@ async def run_generation_session(
     print("=" * 60)
     print(f"Model: {model}")
     print("Generating app_spec.txt, initializer_prompt.md, coding_prompt.md...\n")
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "ANTHROPIC_API_KEY environment variable not set.\n"
-            "Get your API key from: https://console.anthropic.com/"
-        )
 
     # Load template examples from the existing prompts/ directory
     initializer_template = _load_template("initializer_prompt.md")

@@ -20,7 +20,6 @@ Example Usage:
 
 import argparse
 import asyncio
-import os
 from pathlib import Path
 
 from agent import run_autonomous_agent
@@ -62,8 +61,9 @@ Examples:
   # Regenerate .env after editing prompts/:
   python autonomous_agent_demo.py --configure
 
-Environment Variables:
-  ANTHROPIC_API_KEY    Your Anthropic API key (required)
+Authentication:
+  Run 'claude login' once to authenticate via the Claude Code CLI.
+  Alternatively, set ANTHROPIC_API_KEY in your environment.
         """,
     )
 
@@ -129,14 +129,6 @@ Environment Variables:
 def main() -> None:
     """Main entry point."""
     args = parse_args()
-
-    # Check for API key
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("Error: ANTHROPIC_API_KEY environment variable not set")
-        print("\nGet your API key from: https://console.anthropic.com/")
-        print("\nThen set it:")
-        print("  export ANTHROPIC_API_KEY='your-api-key-here'")
-        return
 
     async def _run() -> None:
         # Step 0: Run prompt wizard if requested
