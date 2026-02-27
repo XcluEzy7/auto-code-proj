@@ -1,0 +1,274 @@
+"""
+Configuration Generator
+========================
+
+Uses the Claude Code SDK to read prompts/ files and generate a .env
+configuration file tailored to the detected tech stack.
+
+Usage (from autonomous_agent_demo.py):
+    from configure import run_configure
+    await run_configure(configure_model="claude-haiku-4-5-20251001")
+
+Or standalone:
+    python configure.py
+"""
+
+import asyncio
+import json
+import os
+import re
+from pathlib import Path
+
+from claude_code_sdk import ClaudeCodeOptions, ClaudeSDKClient
+
+
+# Hardcoded defaults for paths — .env doesn't exist yet when this runs
+DEFAULT_PROMPTS_DIR = "prompts"
+DEFAULT_APP_SPEC_FILENAME = "app-spec.txt"
+DEFAULT_INITIALIZER_PROMPT = "initializer_prompt"
+DEFAULT_CODING_PROMPT = "coding_prompt"
+
+CONFIGURE_SYSTEM_PROMPT = """\
+You are a project analyzer that reads application specification files and detects \
+the tech stack to generate environment configuration.
+
+When asked to analyze a project, you will:
+1. Read the prompts/ directory files using Read and Glob tools
+2. Identify the framework, package manager, dev server command, and port
+3. Output ONLY a valid JSON object (no markdown, no explanation) with these exact keys:
+   - framework: string (e.g. "laravel", "django", "rails", "flask", "fastapi", "generic")
+     Use "+" to combine when multiple apply (e.g. "laravel+npm" is NOT valid here — \
+framework is the backend framework only)
+   - package_manager: string (e.g. "npm", "bun", "yarn", "pnpm", "pip", "composer", "cargo", "go")
+     Use "+" to combine when multiple apply (e.g. "composer+npm")
+   - dev_server_cmd: string (e.g. "npm run dev", "php artisan serve", "python manage.py runserver")
+   - dev_server_port: integer (e.g. 3000, 8000, 8080)
+   - agent_system_prompt: string (a tailored system prompt for an AI developer working on this stack)
+   - claude_model: string (always "claude-sonnet-4-6")
+   - configure_model: string (always "claude-haiku-4-5-20251001")
+   - max_turns: integer (always 1000)
+   - auto_continue_delay_seconds: integer (always 3)
+   - feature_list_file: string (always "feature_list.json")
+   - init_script_name: string (always "init.sh")
+   - app_spec_filename: string (always "app-spec.txt")
+   - settings_filename: string (always ".claude_settings.json")
+   - project_dir_prefix: string (always "generations/")
+   - prompts_dir: string (always "prompts")
+   - initializer_prompt_name: string (always "initializer_prompt")
+   - coding_prompt_name: string (always "coding_prompt")
+   - extra_allowed_commands: string (comma-separated, empty if none needed)
+   - extra_allowed_processes: string (comma-separated, empty if none needed)
+
+The agent_system_prompt should be specific to the detected stack. For example:
+- Laravel: "You are an expert Laravel/PHP developer building a production web application..."
+- Django: "You are an expert Django/Python developer building a production web application..."
+- React/Vite: "You are an expert React developer building a production web application..."
+
+Output ONLY the JSON object, starting with { and ending with }. No other text.
+"""
+
+
+def build_configure_prompt(prompts_dir: str) -> str:
+    """Build the prompt instructing the agent to analyze the project."""
+    return f"""\
+Please analyze the project specification files in the `{prompts_dir}/` directory.
+
+Read the following files (use Glob to discover what's available, then Read to get contents):
+- {prompts_dir}/app-spec.txt (or app_spec.txt)
+- {prompts_dir}/initializer_prompt.md
+- {prompts_dir}/coding_prompt.md
+
+Based on what you find, detect the tech stack and output ONLY a JSON configuration object \
+as described in your instructions. Start your response with {{ and end with }}.
+"""
+
+
+def extract_json_from_text(text: str) -> dict:
+    """
+    Extract a JSON object from the agent's text output.
+
+    The agent is instructed to output only JSON, but may occasionally
+    include surrounding text. This handles that gracefully.
+    """
+    # Try direct parse first
+    text = text.strip()
+    if text.startswith("{"):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+    # Find JSON block in the text
+    match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"Could not extract valid JSON from agent output:\n{text[:500]}")
+
+
+def write_env_file(config_data: dict, env_path: Path | None = None) -> Path:
+    """
+    Write a documented .env file from the detected configuration.
+
+    Args:
+        config_data: Dict of config key→value from the configure agent
+        env_path: Path to write to (default: .env in project root)
+
+    Returns:
+        Path to the written .env file
+    """
+    if env_path is None:
+        env_path = Path(__file__).parent / ".env"
+
+    lines = [
+        "# Auto-generated by configure.py",
+        "# Run: python autonomous_agent_demo.py --configure  to regenerate",
+        "",
+        "# =============================================================================",
+        "# AI Settings",
+        "# =============================================================================",
+        "",
+        f"CLAUDE_MODEL={config_data.get('claude_model', 'claude-sonnet-4-6')}",
+        f"CONFIGURE_MODEL={config_data.get('configure_model', 'claude-haiku-4-5-20251001')}",
+        f"MAX_TURNS={config_data.get('max_turns', 1000)}",
+        f"AUTO_CONTINUE_DELAY_SECONDS={config_data.get('auto_continue_delay_seconds', 3)}",
+        "",
+        "# Agent system prompt (single line)",
+        f"AGENT_SYSTEM_PROMPT={config_data.get('agent_system_prompt', 'You are an expert full-stack developer building a production-quality web application.')}",
+        "",
+        "# =============================================================================",
+        "# Tech Stack",
+        "# =============================================================================",
+        "",
+        "# Framework: laravel, django, fastapi, rails, flask, generic",
+        f"FRAMEWORK={config_data.get('framework', 'generic')}",
+        "",
+        "# Package manager: npm, bun, yarn, pnpm, pip, composer, cargo, go",
+        "# Use + to combine: composer+npm",
+        f"PACKAGE_MANAGER={config_data.get('package_manager', 'npm')}",
+        "",
+        "# Command to start the dev server",
+        f"DEV_SERVER_CMD={config_data.get('dev_server_cmd', 'npm run dev')}",
+        "",
+        "# Port the dev server listens on",
+        f"DEV_SERVER_PORT={config_data.get('dev_server_port', 3000)}",
+        "",
+        "# =============================================================================",
+        "# Security Extensions",
+        "# =============================================================================",
+        "",
+        "# Additional bash commands to allow (comma-separated, e.g. 'make,cmake')",
+        f"EXTRA_ALLOWED_COMMANDS={config_data.get('extra_allowed_commands', '')}",
+        "",
+        "# Additional process names for pkill allowlist (comma-separated)",
+        f"EXTRA_ALLOWED_PROCESSES={config_data.get('extra_allowed_processes', '')}",
+        "",
+        "# =============================================================================",
+        "# File Names",
+        "# =============================================================================",
+        "",
+        f"FEATURE_LIST_FILE={config_data.get('feature_list_file', 'feature_list.json')}",
+        f"INIT_SCRIPT_NAME={config_data.get('init_script_name', 'init.sh')}",
+        f"APP_SPEC_FILENAME={config_data.get('app_spec_filename', 'app-spec.txt')}",
+        f"SETTINGS_FILENAME={config_data.get('settings_filename', '.claude_settings.json')}",
+        "",
+        "# =============================================================================",
+        "# Prompt Files",
+        "# =============================================================================",
+        "",
+        f"PROJECT_DIR_PREFIX={config_data.get('project_dir_prefix', 'generations/')}",
+        f"PROMPTS_DIR={config_data.get('prompts_dir', 'prompts')}",
+        f"INITIALIZER_PROMPT_NAME={config_data.get('initializer_prompt_name', 'initializer_prompt')}",
+        f"CODING_PROMPT_NAME={config_data.get('coding_prompt_name', 'coding_prompt')}",
+        "",
+    ]
+
+    env_path.write_text("\n".join(lines))
+    return env_path
+
+
+async def run_configure(
+    configure_model: str | None = None,
+    prompts_dir: str = DEFAULT_PROMPTS_DIR,
+) -> dict:
+    """
+    Run the configuration detection agent.
+
+    Reads prompts/ files via claude-code-sdk with Read+Glob only (no Bash),
+    extracts detected config as JSON, writes .env, and returns the config dict.
+
+    Args:
+        configure_model: Model to use for configuration detection.
+                         Falls back to CONFIGURE_MODEL env var, then haiku default.
+        prompts_dir: Path to the prompts directory (relative to cwd).
+
+    Returns:
+        Dict of detected configuration values.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "ANTHROPIC_API_KEY environment variable not set.\n"
+            "Get your API key from: https://console.anthropic.com/"
+        )
+
+    # Resolve model: argument > env var > default
+    if configure_model is None:
+        configure_model = os.environ.get(
+            "CONFIGURE_MODEL", "claude-haiku-4-5-20251001"
+        )
+
+    print(f"\nRunning configure agent (model: {configure_model})...")
+    print(f"Reading prompts from: {prompts_dir}/")
+
+    client = ClaudeSDKClient(
+        options=ClaudeCodeOptions(
+            model=configure_model,
+            system_prompt=CONFIGURE_SYSTEM_PROMPT,
+            # Read-only tools — no Bash, no Edit, no Write
+            allowed_tools=["Read", "Glob"],
+            max_turns=10,
+            cwd=str(Path.cwd()),
+        )
+    )
+
+    collected_text = ""
+
+    async with client:
+        await client.query(build_configure_prompt(prompts_dir))
+
+        async for msg in client.receive_response():
+            msg_type = type(msg).__name__
+
+            if msg_type == "AssistantMessage" and hasattr(msg, "content"):
+                for block in msg.content:
+                    block_type = type(block).__name__
+                    if block_type == "TextBlock" and hasattr(block, "text"):
+                        collected_text += block.text
+                        # Show progress without printing raw JSON
+                        if not block.text.strip().startswith("{"):
+                            print(block.text, end="", flush=True)
+
+    print("\n")
+
+    # Extract and validate JSON
+    config_data = extract_json_from_text(collected_text)
+
+    # Write .env file
+    env_path = write_env_file(config_data)
+    print(f"✓ Configuration written to: {env_path}")
+    print(f"  Framework:       {config_data.get('framework', '?')}")
+    print(f"  Package manager: {config_data.get('package_manager', '?')}")
+    print(f"  Dev server:      {config_data.get('dev_server_cmd', '?')} "
+          f"(port {config_data.get('dev_server_port', '?')})")
+    print(f"  Claude model:    {config_data.get('claude_model', '?')}")
+    print()
+
+    return config_data
+
+
+if __name__ == "__main__":
+    asyncio.run(run_configure())
