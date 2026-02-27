@@ -26,6 +26,7 @@ from pathlib import Path
 from agent import run_autonomous_agent
 from config import get_config, reload_config
 from configure import run_configure
+from prompter import run_prompter
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,6 +38,15 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Generate prompts interactively from pasted text:
+  python autonomous_agent_demo.py --prompt
+
+  # Generate prompts from a PRD file:
+  python autonomous_agent_demo.py --prompt --prompt-files ./my_prd.txt
+
+  # Full pipeline: generate prompts → detect stack → run agents:
+  python autonomous_agent_demo.py --prompt --configure --project-dir ./my_project
+
   # First time — detect stack, write .env, then run:
   python autonomous_agent_demo.py --project-dir ./my_project --configure
 
@@ -94,6 +104,25 @@ Environment Variables:
              f"from .env or CONFIGURE_MODEL)",
     )
 
+    parser.add_argument(
+        "--prompt",
+        action="store_true",
+        help="Launch the interactive prompt wizard to generate prompts/ files from your PRD.",
+    )
+
+    parser.add_argument(
+        "--prompt-files",
+        nargs="+",
+        metavar="FILE",
+        help="One or more file paths to use as source material (requires --prompt).",
+    )
+
+    parser.add_argument(
+        "--prompt-overwrite",
+        action="store_true",
+        help="Overwrite existing prompts/ files (requires --prompt).",
+    )
+
     return parser.parse_args()
 
 
@@ -110,6 +139,18 @@ def main() -> None:
         return
 
     async def _run() -> None:
+        # Step 0: Run prompt wizard if requested
+        if args.prompt:
+            await run_prompter(
+                prompt_files=args.prompt_files,
+                generation_model=args.model or get_config().claude_model,
+                overwrite=args.prompt_overwrite,
+            )
+            print("Prompt files generated. You can now run --configure to detect the stack.\n")
+            # If --configure not also passed, stop here
+            if not args.configure:
+                return
+
         # Step 1: Run configuration agent if requested
         if args.configure:
             await run_configure(configure_model=args.configure_model)

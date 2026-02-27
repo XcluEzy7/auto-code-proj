@@ -27,8 +27,25 @@ export ANTHROPIC_API_KEY='your-api-key-here'
 
 ## Quick Start
 
+**New to this tool?** Use the prompt wizard to generate your `prompts/` files from a PRD or product brief:
+
 ```bash
-python autonomous_agent_demo.py --project-dir ./my_project
+# Interactive — paste your requirements, answer a few questions:
+python autonomous_agent_demo.py --prompt
+
+# From a file:
+python autonomous_agent_demo.py --prompt --prompt-files ./my_prd.txt
+```
+
+Then run the full pipeline:
+```bash
+python autonomous_agent_demo.py --project-dir ./my_project --configure
+```
+
+Or do it all in one command:
+```bash
+python autonomous_agent_demo.py --prompt --prompt-files ./my_prd.txt \
+    --configure --project-dir ./my_project
 ```
 
 For testing with limited iterations:
@@ -84,11 +101,13 @@ autonomous-coding/
 ├── autonomous_agent_demo.py  # Main entry point
 ├── agent.py                  # Agent session logic
 ├── client.py                 # Claude SDK client configuration
+├── configure.py              # Stack detection and .env generation
+├── prompter.py               # Prompt wizard (generates prompts/ from PRD)
 ├── security.py               # Bash command allowlist and validation
 ├── progress.py               # Progress tracking utilities
 ├── prompts.py                # Prompt loading utilities
 ├── prompts/
-│   ├── app_spec.txt          # Application specification
+│   ├── app_spec.txt          # Application specification (XML)
 │   ├── initializer_prompt.md # First session prompt
 │   └── coding_prompt.md      # Continuation session prompt
 └── requirements.txt          # Python dependencies
@@ -131,13 +150,23 @@ The application will typically be available at `http://localhost:3000` or simila
 |--------|-------------|---------|
 | `--project-dir` | Directory for the project | `./autonomous_demo_project` |
 | `--max-iterations` | Max agent iterations | Unlimited |
-| `--model` | Claude model to use | `claude-sonnet-4-5-20250929` |
+| `--model` | Claude model to use | from `.env` or `claude-sonnet-4-6` |
+| `--configure` | Detect tech stack and write `.env` | — |
+| `--configure-model` | Model for the configure agent | from `.env` or haiku |
+| `--prompt` | Launch prompt wizard to generate `prompts/` files | — |
+| `--prompt-files` | Source file(s) for the wizard (requires `--prompt`) | interactive |
+| `--prompt-overwrite` | Overwrite existing `prompts/` files | — |
 
 ## Customization
 
 ### Changing the Application
 
-Edit `prompts/app_spec.txt` to specify a different application to build.
+The easiest way is to use the prompt wizard with a new requirements document:
+```bash
+python autonomous_agent_demo.py --prompt --prompt-files ./new_prd.txt --prompt-overwrite
+```
+
+Or edit `prompts/app_spec.txt` directly to specify a different application.
 
 ### Adjusting Feature Count
 
