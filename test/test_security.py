@@ -4,7 +4,7 @@ Security Hook Tests
 ===================
 
 Tests for the bash command security validation logic.
-Run with: python test_security.py
+Run with: python test/test_security.py
 """
 
 import asyncio

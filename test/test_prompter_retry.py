@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Prompt generation retry behavior tests.
-Run with: python test_prompter_retry.py
+Run with: python test/test_prompter_retry.py
 """
 
 import subprocess

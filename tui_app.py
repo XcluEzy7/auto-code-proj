@@ -23,6 +23,7 @@ from configure import run_configure
 from prompter import collect_source_documents, run_analysis_session, run_generation_session, write_prompt_files
 from provider_cli import provider_default_model
 from run_logging import RunLogger
+from stream_cleaning import StreamCleaner
 from tui_models import ClarifyingQuestion, PromptFlowPhase
 from tui_services import build_handoff_command, compute_flow_completion, default_project_dir
 from tui_widgets import ArcadeProgress
@@ -142,6 +143,11 @@ class AcapTuiApp(App[list[str] | None]):
         self.edit_mode: bool = False
         self.run_logger: RunLogger | None = None
         self.current_stream_phase: str = "system"
+        self.current_stream_provider: str = self.cfg.agent_cli_id
+        self.stream_cleaner = StreamCleaner(
+            mode=self.cfg.agent_stream_stdout_mode,  # type: ignore[arg-type]
+            show_thinking=self.cfg.agent_stream_show_thinking,
+        )
 
         self.pending_content: str | None = None
         self.pending_provider: str | None = None
@@ -380,7 +386,13 @@ class AcapTuiApp(App[list[str] | None]):
             self.query_one("#milestone", Static).update(f"Milestone unlocked: {phase.value}")
 
     def _stream_cb(self, stream: str, text: str) -> None:
-        self.call_from_thread(self._append_log, f"[{stream}] {text}")
+        rendered_lines = self.stream_cleaner.ingest(
+            provider=self.current_stream_provider,
+            stream=stream,
+            raw_line=text,
+        )
+        for rendered in rendered_lines:
+            self.call_from_thread(self._append_log, f"[{stream}] {rendered}")
         self.call_from_thread(
             self._log_event,
             self.current_stream_phase,
@@ -536,6 +548,7 @@ class AcapTuiApp(App[list[str] | None]):
     @work(thread=True, exclusive=True)
     def run_flow_worker(self, include_configure: bool) -> None:
         prompt_files, source_content, provider, model, project_dir = self._resolve_inputs()
+        self.current_stream_provider = provider
         self._ensure_run_logger(provider, model, project_dir)
         try:
             if not prompt_files and not source_content:
@@ -661,6 +674,7 @@ class AcapTuiApp(App[list[str] | None]):
     @work(thread=True, exclusive=True)
     def run_configure_worker(self) -> None:
         _, _, provider, model, project_dir = self._resolve_inputs()
+        self.current_stream_provider = provider
         self._ensure_run_logger(provider, model, project_dir)
         try:
             self.call_from_thread(self._set_phase, PromptFlowPhase.CONFIGURE, "running", "Detecting stack")
@@ -699,8 +713,15 @@ class AcapTuiApp(App[list[str] | None]):
 def run_handoff_command_with_logging(
     handoff_command: list[str],
     run_logger: RunLogger | None,
+    provider: str = "claude",
+    stream_mode: str = "assistant_text",
+    show_thinking: bool = False,
 ) -> int:
     """Stream handoff command output to terminal and structured JSONL log."""
+    cleaner = StreamCleaner(
+        mode=stream_mode,  # type: ignore[arg-type]
+        show_thinking=show_thinking,
+    )
     if run_logger is not None:
         run_logger.log_event(
             phase="agent",
@@ -740,10 +761,16 @@ def run_handoff_command_with_logging(
             completed_streams += 1
             continue
         text = line.rstrip("\n")
-        if stream_name == "stdout":
-            print(text, flush=True)
-        else:
-            print(text, file=sys.stderr, flush=True)
+        rendered_lines = cleaner.ingest(
+            provider=provider,
+            stream=stream_name,
+            raw_line=text,
+        )
+        for rendered in rendered_lines:
+            if stream_name == "stdout":
+                print(rendered, flush=True)
+            else:
+                print(rendered, file=sys.stderr, flush=True)
         if run_logger is not None:
             run_logger.log_event(
                 phase="agent",
@@ -778,7 +805,13 @@ def main() -> None:
     app = AcapTuiApp(args)
     handoff_command = app.run()
     if handoff_command:
-        run_handoff_command_with_logging(handoff_command, app.run_logger)
+        run_handoff_command_with_logging(
+            handoff_command,
+            app.run_logger,
+            provider=app.current_stream_provider,
+            stream_mode=app.cfg.agent_stream_stdout_mode,
+            show_thinking=app.cfg.agent_stream_show_thinking,
+        )
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 JSON extraction tests for configure.extract_json_from_text.
-Run with: python test_json_extraction.py
+Run with: python test/test_json_extraction.py
 """
 
 import json

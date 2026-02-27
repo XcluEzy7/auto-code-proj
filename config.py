@@ -121,6 +121,16 @@ def _parse_bool_env(value: str | None, default: bool) -> bool:
     return default
 
 
+def _parse_stream_mode_env(value: str | None, default: str) -> str:
+    """Parse stdout rendering mode env setting with safe fallback."""
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"assistant_text", "compact", "raw"}:
+        return normalized
+    return default
+
+
 @dataclass
 class ProjectConfig:
     """All project configuration, loaded from .env with sensible defaults."""
@@ -172,6 +182,8 @@ class ProjectConfig:
     prompt_autonomy_override: bool = True
     agent_run_logging_enabled: bool = True
     agent_run_log_dir: str = "logs"
+    agent_stream_stdout_mode: str = "assistant_text"
+    agent_stream_show_thinking: bool = False
 
     @property
     def allowed_commands(self) -> set[str]:
@@ -317,6 +329,12 @@ def get_config() -> ProjectConfig:
             os.environ.get("AGENT_RUN_LOGGING_ENABLED"), True
         ),
         agent_run_log_dir=os.environ.get("AGENT_RUN_LOG_DIR", "logs"),
+        agent_stream_stdout_mode=_parse_stream_mode_env(
+            os.environ.get("AGENT_STREAM_STDOUT_MODE"), "assistant_text"
+        ),
+        agent_stream_show_thinking=_parse_bool_env(
+            os.environ.get("AGENT_STREAM_SHOW_THINKING"), False
+        ),
     )
 
 
