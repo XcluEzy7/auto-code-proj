@@ -49,7 +49,7 @@ def test_extract_commands():
 
     test_cases = [
         ("ls -la", ["ls"]),
-        ("npm install && npm run build", ["npm", "npm"]),
+        ("bun install && bun run build", ["bun", "bun"]),
         ("cat file.txt | grep pattern", ["cat", "grep"]),
         ("/usr/bin/node script.js", ["node"]),
         ("VAR=value ls", ["ls"]),
@@ -190,6 +190,8 @@ def main():
         "echo hello",
         "kill 12345",
         "killall node",
+        "npm install",
+        "npm run build",
         # pkill with non-dev processes
         "pkill bash",
         "pkill chrome",
@@ -232,8 +234,10 @@ def main():
         # Directory
         "pwd",
         # Node.js development
-        "npm install",
-        "npm run build",
+        "bun install",
+        "bun run build",
+        "pnpm install",
+        "pnpm run build",
         "node server.js",
         # Version control
         "git status",
@@ -245,12 +249,14 @@ def main():
         "sleep 2",
         # Allowed pkill patterns for dev servers
         "pkill node",
-        "pkill npm",
+        "pkill bun",
+        "pkill pnpm",
         "pkill -f node",
         "pkill -f 'node server.js'",
         "pkill vite",
         # Chained commands
-        "npm install && npm run build",
+        "bun install && bun run build",
+        "pnpm install && pnpm run build",
         "ls | grep test",
         # Full paths
         "/usr/local/bin/node app.js",

@@ -44,6 +44,11 @@ Focus questions on missing specifics such as:
 - Data persistence requirements
 - Any ambiguous or conflicting requirements
 
+If the user does not specify a stack or package manager, default to a Turborepo
+monorepo using Bun as the primary package manager with pnpm as a fallback.
+Do not ask a question about package manager or monorepo tooling unless the user
+explicitly indicates a different preference.
+
 Output ONLY a valid JSON object with these exact keys:
 - analysis: string (1-2 sentence summary of what will be built)
 - questions: array of objects, each with:
@@ -69,6 +74,11 @@ You will receive:
 Generate all three files following the exact structure of the provided templates.
 Customize all content (project name, features, tech stack, database schema, API endpoints,
 UI layout, design system, implementation steps) to match the user's specific requirements.
+
+Default choices (unless the user specifies otherwise):
+- Use a Turborepo monorepo layout with `apps/` and `packages/`
+- Use Bun as the primary package manager and document a pnpm fallback
+- Prefer `bunx turbo` for running Turborepo commands
 
 Output ONLY a valid JSON object with these exact keys:
 - app_spec: string (full XML project specification following <project_specification> format)

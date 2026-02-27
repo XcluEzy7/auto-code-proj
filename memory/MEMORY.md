@@ -20,7 +20,7 @@ Two-agent pattern: initializer (generates feature_list.json) + coding agent (imp
 - `reload_config()` clears cache and re-reads .env (used after --configure writes it)
 - Computed properties: `allowed_commands`, `allowed_processes`, `dev_server_url`
 - Framework→command mappings in `FRAMEWORK_COMMANDS` and `PACKAGE_MANAGER_COMMANDS`
-- Use `+` to combine: `PACKAGE_MANAGER=composer+npm`
+- Use `+` to combine: `PACKAGE_MANAGER=composer+pnpm`
 
 ## Key Config Fields & Defaults
 | Key | Default |
@@ -28,8 +28,8 @@ Two-agent pattern: initializer (generates feature_list.json) + coding agent (imp
 | CLAUDE_MODEL | claude-sonnet-4-6 |
 | CONFIGURE_MODEL | claude-haiku-4-5-20251001 |
 | FRAMEWORK | generic |
-| PACKAGE_MANAGER | npm |
-| DEV_SERVER_CMD | npm run dev |
+| PACKAGE_MANAGER | bun+pnpm |
+| DEV_SERVER_CMD | bun run dev |
 | DEV_SERVER_PORT | 3000 |
 | FEATURE_LIST_FILE | feature_list.json |
 | PROJECT_DIR_PREFIX | generations/ |

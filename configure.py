@@ -39,8 +39,8 @@ When asked to analyze a project, you will:
      Use "+" to combine when multiple apply (e.g. "laravel+npm" is NOT valid here — \
 framework is the backend framework only)
    - package_manager: string (e.g. "npm", "bun", "yarn", "pnpm", "pip", "composer", "cargo", "go")
-     Use "+" to combine when multiple apply (e.g. "composer+npm")
-   - dev_server_cmd: string (e.g. "npm run dev", "php artisan serve", "python manage.py runserver")
+     Use "+" to combine when multiple apply (e.g. "composer+pnpm")
+   - dev_server_cmd: string (e.g. "bun run dev", "php artisan serve", "python manage.py runserver")
    - dev_server_port: integer (e.g. 3000, 8000, 8080)
    - agent_system_prompt: string (a tailored system prompt for an AI developer working on this stack)
    - claude_model: string (always "claude-sonnet-4-6")
@@ -227,11 +227,11 @@ def write_env_file(config_data: dict, env_path: Path | None = None) -> Path:
         f"FRAMEWORK={config_data.get('framework', 'generic')}",
         "",
         "# Package manager: npm, bun, yarn, pnpm, pip, composer, cargo, go",
-        "# Use + to combine: composer+npm",
-        f"PACKAGE_MANAGER={config_data.get('package_manager', 'npm')}",
+        "# Use + to combine: composer+pnpm",
+        f"PACKAGE_MANAGER={config_data.get('package_manager', 'bun+pnpm')}",
         "",
         "# Command to start the dev server",
-        f"DEV_SERVER_CMD={config_data.get('dev_server_cmd', 'npm run dev')}",
+        f"DEV_SERVER_CMD={config_data.get('dev_server_cmd', 'bun run dev')}",
         "",
         "# Port the dev server listens on",
         f"DEV_SERVER_PORT={config_data.get('dev_server_port', 3000)}",

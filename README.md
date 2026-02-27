@@ -156,6 +156,8 @@ uv sync
 uv run python3 acaps.py --project-dir ./my_project
 ```
 
+By default, the generated app is a Turborepo monorepo using Bun, with a pnpm fallback.
+
 ---
 
 ## How It Works
@@ -178,7 +180,7 @@ Reads your `prompts/` files and figures out your tech stack automatically, then 
 
 What it writes to `.env`:
 - `FRAMEWORK` - e.g. `laravel`, `django`, `react`, `generic`
-- `PACKAGE_MANAGER` - e.g. `npm`, `pip`, `composer+npm`
+- `PACKAGE_MANAGER` - e.g. `bun+pnpm`, `pip`, `composer+pnpm`
 - `DEV_SERVER_CMD` and `DEV_SERVER_PORT` - how to start the app
 - `AGENT_SYSTEM_PROMPT` - a custom system prompt tuned for your stack
 
@@ -218,10 +220,10 @@ The agents only have access to what they need (see `security.py` and `client.py`
 1. **Sandbox** - bash commands run in an isolated environment at the OS level
 2. **Filesystem** - file operations are locked to the project directory only
 3. **Command allowlist** - only specific commands are allowed to run:
-   - Browsing files: `ls`, `cat`, `head`, `tail`, `wc`, `grep`
-   - Node.js: `npm`, `node`
-   - Git: `git`
-   - Process management: `ps`, `lsof`, `sleep`, `pkill` (dev processes only)
+  - Browsing files: `ls`, `cat`, `head`, `tail`, `wc`, `grep`
+  - Node.js: `bun`, `pnpm`, `node`
+  - Git: `git`
+  - Process management: `ps`, `lsof`, `sleep`, `pkill` (dev processes only)
 
 Anything not on the list gets blocked automatically.
 
@@ -276,8 +278,12 @@ cd generations/my_project
 ./init.sh
 
 # Or start it manually (most Node.js apps):
-npm install
-npm run dev
+bun install
+bun run dev
+
+# If Bun is unavailable, fall back to pnpm:
+pnpm install
+pnpm dev
 ```
 
 It will usually be at `http://localhost:3000`. Check `init.sh` or the agent output for the exact URL.

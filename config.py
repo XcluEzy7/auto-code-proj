@@ -32,12 +32,12 @@ FRAMEWORK_COMMANDS: dict[str, set[str]] = {
     "fastapi": {"python", "pip", "uvicorn"},
     "rails": {"ruby", "bundle", "rails"},
     "flask": {"python", "pip"},
-    # nextjs/react/vue/express covered by npm package manager
+    # nextjs/react/vue/express covered by JS package manager
 }
 
 PACKAGE_MANAGER_COMMANDS: dict[str, set[str]] = {
     "npm": {"npm", "node", "npx"},
-    "bun": {"bun"},
+    "bun": {"bun", "bunx"},
     "yarn": {"yarn", "node"},
     "pnpm": {"pnpm", "node"},
     "pip": {"pip", "python"},
@@ -75,7 +75,7 @@ FRAMEWORK_PROCESSES: dict[str, set[str]] = {
 
 PACKAGE_MANAGER_PROCESSES: dict[str, set[str]] = {
     "npm": {"node", "npm", "npx", "vite", "next"},
-    "bun": {"bun"},
+    "bun": {"bun", "bunx"},
     "yarn": {"yarn", "node"},
     "pnpm": {"pnpm", "node"},
     "pip": {"python"},
@@ -86,7 +86,9 @@ PACKAGE_MANAGER_PROCESSES: dict[str, set[str]] = {
 
 # Default system prompt
 DEFAULT_SYSTEM_PROMPT = (
-    "You are an expert full-stack developer building a production-quality web application."
+    "You are an expert full-stack developer building a production-quality web application. "
+    "Default to a Turborepo monorepo using Bun as the primary package manager "
+    "with pnpm as a fallback unless the user specifies otherwise."
 )
 
 ProviderId = Literal["claude", "codex", "omp", "opencode"]
@@ -132,8 +134,8 @@ class ProjectConfig:
 
     # Tech Stack
     framework: str = "generic"
-    package_manager: str = "npm"
-    dev_server_cmd: str = "npm run dev"
+    package_manager: str = "bun+pnpm"
+    dev_server_cmd: str = "bun run dev"
     dev_server_port: int = 3000
 
     # Security Extensions (comma-separated strings, parsed to sets at runtime)
@@ -255,8 +257,8 @@ def get_config() -> ProjectConfig:
             os.environ.get("AUTO_CONTINUE_DELAY_SECONDS", "3")
         ),
         framework=os.environ.get("FRAMEWORK", "generic"),
-        package_manager=os.environ.get("PACKAGE_MANAGER", "npm"),
-        dev_server_cmd=os.environ.get("DEV_SERVER_CMD", "npm run dev"),
+        package_manager=os.environ.get("PACKAGE_MANAGER", "bun+pnpm"),
+        dev_server_cmd=os.environ.get("DEV_SERVER_CMD", "bun run dev"),
         dev_server_port=int(os.environ.get("DEV_SERVER_PORT", "3000")),
         extra_allowed_commands=os.environ.get("EXTRA_ALLOWED_COMMANDS", ""),
         extra_allowed_processes=os.environ.get("EXTRA_ALLOWED_PROCESSES", ""),
