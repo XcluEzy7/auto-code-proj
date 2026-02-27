@@ -5,7 +5,7 @@ A Python harness that drives the Claude Code SDK to autonomously build web appli
 Two-agent pattern: initializer (generates feature_list.json) + coding agent (implements features).
 
 ## Architecture (6 core files + 2 new)
-- `autonomous_agent_demo.py` — CLI entry point, argparse, orchestrates configure + agent loop
+- `acaps.py` — CLI entry point, argparse, orchestrates configure + agent loop
 - `agent.py` — Main agent loop logic (run_autonomous_agent, run_agent_session)
 - `client.py` — Creates ClaudeSDKClient with security settings and hooks
 - `security.py` — Pre-tool-use bash command allowlist hook (bash_security_hook)
@@ -37,9 +37,9 @@ Two-agent pattern: initializer (generates feature_list.json) + coding agent (imp
 ## Workflow
 ```
 # First time:
-python autonomous_agent_demo.py --project-dir ./my_project --configure
+python acaps.py --project-dir ./my_project --configure
 # Subsequent:
-python autonomous_agent_demo.py --project-dir ./my_project
+python acaps.py --project-dir ./my_project
 ```
 
 ## Security

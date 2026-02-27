@@ -9,13 +9,13 @@ incorporates all the strategies from the long-running agents guide.
 
 Example Usage:
     # Auto-detect tech stack and write .env, then start coding:
-    python autonomous_agent_demo.py --project-dir ./my_project --configure
+    python acaps.py --project-dir ./my_project --configure
 
     # Start (or resume) using existing .env config:
-    python autonomous_agent_demo.py --project-dir ./my_project
+    python acaps.py --project-dir ./my_project
 
     # Limit iterations for testing:
-    python autonomous_agent_demo.py --project-dir ./my_project --max-iterations 5
+    python acaps.py --project-dir ./my_project --max-iterations 5
 """
 
 import argparse
@@ -38,28 +38,28 @@ def parse_args() -> argparse.Namespace:
         epilog="""
 Examples:
   # Generate prompts interactively from pasted text:
-  python autonomous_agent_demo.py --prompt
+  python acaps.py --prompt
 
   # Generate prompts from a PRD file:
-  python autonomous_agent_demo.py --prompt --prompt-files ./my_prd.txt
+  python acaps.py --prompt --prompt-files ./my_prd.txt
 
   # Full pipeline: generate prompts → detect stack → run agents:
-  python autonomous_agent_demo.py --prompt --configure --project-dir ./my_project
+  python acaps.py --prompt --configure --project-dir ./my_project
 
   # First time — detect stack, write .env, then run:
-  python autonomous_agent_demo.py --project-dir ./my_project --configure
+  python acaps.py --project-dir ./my_project --configure
 
   # Resume or start with existing .env:
-  python autonomous_agent_demo.py --project-dir ./my_project
+  python acaps.py --project-dir ./my_project
 
   # Override the model for this run only:
-  python autonomous_agent_demo.py --project-dir ./my_project --model claude-opus-4-6
+  python acaps.py --project-dir ./my_project --model claude-opus-4-6
 
   # Limit iterations for testing:
-  python autonomous_agent_demo.py --project-dir ./my_project --max-iterations 5
+  python acaps.py --project-dir ./my_project --max-iterations 5
 
   # Regenerate .env after editing prompts/:
-  python autonomous_agent_demo.py --configure
+  python acaps.py --configure
 
 Authentication:
   Run 'claude login' once to authenticate via the Claude Code CLI.

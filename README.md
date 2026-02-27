@@ -119,27 +119,27 @@ export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 
 ```bash
 # Interactive: paste your requirements and answer a few questions
-python autonomous_agent_demo.py --prompt
+python acaps.py --prompt
 
 # Or point it at a file
-python autonomous_agent_demo.py --prompt --prompt-files ./my_prd.txt
+python acaps.py --prompt --prompt-files ./my_prd.txt
 ```
 
 **Step 2: Detect your tech stack and write the config**
 
 ```bash
-python autonomous_agent_demo.py --configure --project-dir ./my_project
+python acaps.py --configure --project-dir ./my_project
 ```
 
 **Step 3: Run the coding agents**
 
 ```bash
-python autonomous_agent_demo.py --project-dir ./my_project
+python acaps.py --project-dir ./my_project
 ```
 
 You can also do all three steps in one go:
 ```bash
-python autonomous_agent_demo.py --prompt --prompt-files ./my_prd.txt \
+python acaps.py --prompt --prompt-files ./my_prd.txt \
     --configure --project-dir ./my_project
 ```
 
@@ -218,7 +218,7 @@ Anything not on the list gets blocked automatically.
 
 ```
 acap/
-├── autonomous_agent_demo.py  # Main entry point
+├── acaps.py  # Main entry point
 ├── agent.py                  # Agent session logic
 ├── client.py                 # Claude SDK client setup
 ├── configure.py              # Stack detection and .env writing
@@ -289,7 +289,7 @@ It will usually be at `http://localhost:3000`. Check `init.sh` or the agent outp
 
 Run the wizard again with new requirements:
 ```bash
-python autonomous_agent_demo.py --prompt --prompt-files ./new_prd.txt --prompt-overwrite
+python acaps.py --prompt --prompt-files ./new_prd.txt --prompt-overwrite
 ```
 
 Or just edit `prompts/app_spec.txt` directly.

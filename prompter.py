@@ -8,7 +8,7 @@ and generates all three prompt files needed by the agent harness:
   - prompts/initializer_prompt.md
   - prompts/coding_prompt.md
 
-Usage (from autonomous_agent_demo.py):
+Usage (from acaps.py):
     from prompter import run_prompter
     await run_prompter(prompt_files=["prd.txt"], overwrite=False)
 
