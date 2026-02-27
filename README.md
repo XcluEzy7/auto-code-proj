@@ -180,6 +180,7 @@ uv run python3 tui_app.py \
 
 Inside the TUI:
 - `Up/Down` + `Enter` navigate menus
+- `E` toggles field editing mode
 - `L` toggles phase view vs streaming output log pane
 - `H` hands off to the coding agent command after prep completes
 - `Q` quits

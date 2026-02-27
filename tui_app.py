@@ -69,9 +69,10 @@ class AcapTuiApp(App[list[str] | None]):
     """
 
     BINDINGS = [
-        Binding("up", "menu_up", "Up"),
-        Binding("down", "menu_down", "Down"),
-        Binding("enter", "menu_select", "Select"),
+        Binding("up", "menu_up", "Up", priority=True),
+        Binding("down", "menu_down", "Down", priority=True),
+        Binding("enter", "menu_select", "Select", priority=True),
+        Binding("e", "toggle_edit_mode", "Edit Fields", priority=True),
         Binding("l", "toggle_logs", "Toggle Logs"),
         Binding("h", "handoff", "Handoff"),
         Binding("q", "quit", "Quit"),
@@ -93,6 +94,7 @@ class AcapTuiApp(App[list[str] | None]):
         self.cfg = get_config()
         self.flow_mode: str | None = None
         self.handoff_command: list[str] | None = None
+        self.edit_mode: bool = False
         self.phase_state: dict[PromptFlowPhase, str] = {
             PromptFlowPhase.ANALYZE: "queued",
             PromptFlowPhase.QA: "queued",
@@ -111,7 +113,10 @@ class AcapTuiApp(App[list[str] | None]):
                 yield ArcadeProgress(id="arcade")
                 yield Static("", id="milestone")
             with Vertical(id="right"):
-                yield Static("Use arrows + Enter. Press L to toggle stream logs.", id="status")
+                yield Static(
+                    "Menu mode: arrows + Enter. Press E to edit fields, L for logs.",
+                    id="status",
+                )
                 yield Input(
                     value=" ".join(self.args.prompt_files or []),
                     placeholder="Prompt source files (space separated)",
@@ -148,7 +153,17 @@ class AcapTuiApp(App[list[str] | None]):
     def on_mount(self) -> None:
         self._render_menu()
         self._render_timeline()
+        self._set_inputs_enabled(False)
         self.set_interval(0.7, self._pulse_arcade)
+
+    def _set_inputs_enabled(self, enabled: bool) -> None:
+        for widget_id in ("#prompt_files", "#project_dir", "#provider_id", "#model_id", "#req_input"):
+            input_widget = self.query_one(widget_id, Input)
+            input_widget.disabled = not enabled
+        if enabled:
+            self.set_focus(self.query_one("#prompt_files", Input))
+        else:
+            self.set_focus(None)
 
     def _pulse_arcade(self) -> None:
         self.pulse_tick += 1
@@ -207,6 +222,9 @@ class AcapTuiApp(App[list[str] | None]):
         self._render_menu()
 
     def action_menu_select(self) -> None:
+        if self.edit_mode:
+            self._set_status("Exit edit mode with E before selecting a menu action")
+            return
         choice = self.MENU_ITEMS[self.selected_index]
         if choice == "Quit":
             self.exit(None)
@@ -237,6 +255,14 @@ class AcapTuiApp(App[list[str] | None]):
             self._set_status("Handoff not ready yet")
             return
         self.exit(self.handoff_command)
+
+    def action_toggle_edit_mode(self) -> None:
+        self.edit_mode = not self.edit_mode
+        self._set_inputs_enabled(self.edit_mode)
+        if self.edit_mode:
+            self._set_status("Edit mode enabled: type in fields. Press E to return to menu mode.")
+        else:
+            self._set_status("Menu mode enabled: use arrows + Enter to select workflow.")
 
     def _resolve_inputs(self) -> tuple[list[str], str, str, str, Path]:
         file_input = self.query_one("#prompt_files", Input).value.strip()
