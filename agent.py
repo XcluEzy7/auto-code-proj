@@ -3,92 +3,68 @@ Agent Session Logic
 ===================
 
 Core agent interaction functions for running autonomous coding sessions.
+Uses subprocess piping to the Claude CLI instead of the SDK.
 """
 
 import asyncio
+import subprocess
 from pathlib import Path
 from typing import Optional
 
-from claude_code_sdk import ClaudeSDKClient
-
-from client import create_client
+from client import create_settings
 from config import get_config
 from progress import print_session_header, print_progress_summary
 from prompts import get_initializer_prompt, get_coding_prompt, copy_spec_to_project
 
 
-async def run_agent_session(
-    client: ClaudeSDKClient,
-    message: str,
+def run_agent_session(
+    prompt: str,
     project_dir: Path,
+    model: str,
+    settings_file: Path,
 ) -> tuple[str, str]:
     """
-    Run a single agent session using Claude Agent SDK.
+    Run a single agent session by piping the prompt to the Claude CLI via stdin.
 
     Args:
-        client: Claude SDK client
-        message: The prompt to send
+        prompt: The prompt to send
         project_dir: Project directory path
+        model: Claude model to use
+        settings_file: Path to the settings JSON file
 
     Returns:
         (status, response_text) where status is:
-        - "continue" if agent should continue working
+        - "continue" if session completed successfully
         - "error" if an error occurred
     """
-    print("Sending prompt to Claude Agent SDK...\n")
+    cfg = get_config()
 
-    try:
-        # Send the query
-        await client.query(message)
+    cmd = [
+        "claude",
+        "--dangerously-skip-permissions",
+        "--model", model,
+        "--settings", str(settings_file.resolve()),
+        "--append-system-prompt", cfg.agent_system_prompt,
+    ]
 
-        # Collect response text and show tool use
-        response_text = ""
-        async for msg in client.receive_response():
-            msg_type = type(msg).__name__
+    print("Sending prompt to Claude CLI...\n")
 
-            # Handle AssistantMessage (text and tool use)
-            if msg_type == "AssistantMessage" and hasattr(msg, "content"):
-                for block in msg.content:
-                    block_type = type(block).__name__
+    result = subprocess.run(
+        cmd,
+        input=prompt,
+        capture_output=True,
+        text=True,
+        cwd=str(project_dir.resolve()),
+    )
 
-                    if block_type == "TextBlock" and hasattr(block, "text"):
-                        response_text += block.text
-                        print(block.text, end="", flush=True)
-                    elif block_type == "ToolUseBlock" and hasattr(block, "name"):
-                        print(f"\n[Tool: {block.name}]", flush=True)
-                        if hasattr(block, "input"):
-                            input_str = str(block.input)
-                            if len(input_str) > 200:
-                                print(f"   Input: {input_str[:200]}...", flush=True)
-                            else:
-                                print(f"   Input: {input_str}", flush=True)
+    if result.returncode != 0:
+        error_msg = result.stderr[:500] if result.stderr else "(no stderr)"
+        print(f"[Error] {error_msg}")
+        return "error", result.stderr
 
-            # Handle UserMessage (tool results)
-            elif msg_type == "UserMessage" and hasattr(msg, "content"):
-                for block in msg.content:
-                    block_type = type(block).__name__
-
-                    if block_type == "ToolResultBlock":
-                        result_content = getattr(block, "content", "")
-                        is_error = getattr(block, "is_error", False)
-
-                        # Check if command was blocked by security hook
-                        if "blocked" in str(result_content).lower():
-                            print(f"   [BLOCKED] {result_content}", flush=True)
-                        elif is_error:
-                            # Show errors (truncated)
-                            error_str = str(result_content)[:500]
-                            print(f"   [Error] {error_str}", flush=True)
-                        else:
-                            # Tool succeeded - just show brief confirmation
-                            print("   [Done]", flush=True)
-
-        print("\n" + "-" * 70 + "\n")
-        return "continue", response_text
-
-    except Exception as e:
-        print(f"Error during agent session: {e}")
-        return "error", str(e)
+    print(result.stdout)
+    print("\n" + "-" * 70 + "\n")
+    return "continue", result.stdout
 
 
 async def run_autonomous_agent(
@@ -130,14 +106,16 @@ async def run_autonomous_agent(
         print("=" * 70)
         print("  NOTE: First session takes 10-20+ minutes!")
         print("  The agent is generating 200 detailed test cases.")
-        print("  This may appear to hang - it's working. Watch for [Tool: ...] output.")
+        print("  This may appear to hang - it's working. Watch for output.")
         print("=" * 70)
         print()
-        # Copy the app spec into the project directory for the agent to read
         copy_spec_to_project(project_dir)
     else:
         print("Continuing existing project")
         print_progress_summary(project_dir)
+
+    # Create settings file once for all sessions
+    settings_file = create_settings(project_dir)
 
     # Main loop
     iteration = 0
@@ -154,9 +132,6 @@ async def run_autonomous_agent(
         # Print session header
         print_session_header(iteration, is_first_run)
 
-        # Create client (fresh context)
-        client = create_client(project_dir, model)
-
         # Choose prompt based on session type
         if is_first_run:
             prompt = get_initializer_prompt()
@@ -164,9 +139,8 @@ async def run_autonomous_agent(
         else:
             prompt = get_coding_prompt()
 
-        # Run session with async context manager
-        async with client:
-            status, response = await run_agent_session(client, prompt, project_dir)
+        # Run session
+        status, _ = run_agent_session(prompt, project_dir, model, settings_file)
 
         # Handle status
         if status == "continue":
