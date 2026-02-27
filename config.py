@@ -170,6 +170,8 @@ class ProjectConfig:
     agent_cli_auto_approve_fallback: bool = True
     agent_cli_dangerous_fallback: bool = True
     prompt_autonomy_override: bool = True
+    agent_run_logging_enabled: bool = True
+    agent_run_log_dir: str = "logs"
 
     @property
     def allowed_commands(self) -> set[str]:
@@ -311,6 +313,10 @@ def get_config() -> ProjectConfig:
         prompt_autonomy_override=_parse_bool_env(
             os.environ.get("PROMPT_AUTONOMY_OVERRIDE"), True
         ),
+        agent_run_logging_enabled=_parse_bool_env(
+            os.environ.get("AGENT_RUN_LOGGING_ENABLED"), True
+        ),
+        agent_run_log_dir=os.environ.get("AGENT_RUN_LOG_DIR", "logs"),
     )
 
 

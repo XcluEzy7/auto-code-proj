@@ -192,6 +192,19 @@ If `--prompt-files` are provided, the requirements textbox is hidden and those f
 
 The TUI is additive: existing `acaps.py --prompt`, `--configure`, and full-run CLI flows remain unchanged.
 
+Run logging for refinement is enabled by default in TUI mode. Each run writes structured JSONL output to `logs/` (configurable) and includes prep-phase events plus post-handoff coding-agent stdout/stderr.
+
+Related env keys:
+- `AGENT_RUN_LOGGING_ENABLED=true|false` (default: `true`)
+- `AGENT_RUN_LOG_DIR=logs` (default: `logs`)
+
+Quickly fetch the latest run log path (and optional tail preview):
+
+```bash
+uv run python3 latest_run_log.py
+uv run python3 latest_run_log.py --tail 60
+```
+
 ---
 
 ## How It Works

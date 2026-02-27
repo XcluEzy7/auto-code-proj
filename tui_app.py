@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import queue
 import subprocess
+import sys
+import threading
 from pathlib import Path
 
 from textual import work
@@ -19,6 +22,7 @@ from config import get_config
 from configure import run_configure
 from prompter import collect_source_documents, run_analysis_session, run_generation_session, write_prompt_files
 from provider_cli import provider_default_model
+from run_logging import RunLogger
 from tui_models import ClarifyingQuestion, PromptFlowPhase
 from tui_services import build_handoff_command, compute_flow_completion, default_project_dir
 from tui_widgets import ArcadeProgress
@@ -136,6 +140,8 @@ class AcapTuiApp(App[list[str] | None]):
         self.cfg = get_config()
         self.handoff_command: list[str] | None = None
         self.edit_mode: bool = False
+        self.run_logger: RunLogger | None = None
+        self.current_stream_phase: str = "system"
 
         self.pending_content: str | None = None
         self.pending_provider: str | None = None
@@ -310,14 +316,64 @@ class AcapTuiApp(App[list[str] | None]):
 
     def _set_status(self, text: str) -> None:
         self.query_one("#status", Static).update(text)
+        self._log_event(
+            phase=self.current_stream_phase,
+            event_type="status",
+            message=text,
+        )
 
     def _append_log(self, line: str) -> None:
         self.query_one("#logs", RichLog).write(line)
 
+    def _ensure_run_logger(self, provider: str, model: str, project_dir: Path) -> None:
+        if self.run_logger is not None:
+            return
+        self.run_logger = RunLogger.create(
+            enabled=self.cfg.agent_run_logging_enabled,
+            base_dir=Path(self.cfg.agent_run_log_dir),
+            provider=provider,
+            model=model,
+            project_dir=project_dir.resolve(),
+        )
+        if self.run_logger.enabled and self.run_logger.log_file is not None:
+            self._append_log(f"[runlog] {self.run_logger.log_file}")
+            self.run_logger.log_event(
+                phase="system",
+                event_type="lifecycle",
+                message="run_started",
+            )
+
+    def _log_event(
+        self,
+        phase: str,
+        event_type: str,
+        message: str,
+        stream: str | None = None,
+        meta: dict[str, str] | None = None,
+    ) -> None:
+        if self.run_logger is None:
+            return
+        self.run_logger.log_event(
+            phase=phase,
+            event_type=event_type,
+            message=message,
+            stream=stream,
+            meta=meta,
+        )
+
     def _set_phase(self, phase: PromptFlowPhase, state: str, message: str = "") -> None:
         self.phase_state[phase] = state
+        if state == "running":
+            self.current_stream_phase = phase.value
         self._render_timeline()
         self.query_one("#arcade", ArcadeProgress).set_progress(compute_flow_completion(phase))
+        self._log_event(
+            phase.value,
+            "control",
+            f"phase_{state}",
+            None,
+            {"status_message": message} if message else None,
+        )
         if message:
             self._set_status(message)
         if state == "done":
@@ -325,6 +381,13 @@ class AcapTuiApp(App[list[str] | None]):
 
     def _stream_cb(self, stream: str, text: str) -> None:
         self.call_from_thread(self._append_log, f"[{stream}] {text}")
+        self.call_from_thread(
+            self._log_event,
+            self.current_stream_phase,
+            "stream",
+            text,
+            stream,
+        )
 
     def _status_cb(self, phase_name: str, message: str) -> None:
         mapping = {
@@ -461,11 +524,19 @@ class AcapTuiApp(App[list[str] | None]):
         if not self.handoff_command:
             self._set_status("Handoff not ready yet")
             return
+        self._log_event(
+            PromptFlowPhase.HANDOFF.value,
+            "lifecycle",
+            "handoff_requested",
+            None,
+            {"command": " ".join(self.handoff_command)},
+        )
         self.exit(self.handoff_command)
 
     @work(thread=True, exclusive=True)
     def run_flow_worker(self, include_configure: bool) -> None:
         prompt_files, source_content, provider, model, project_dir = self._resolve_inputs()
+        self._ensure_run_logger(provider, model, project_dir)
         try:
             if not prompt_files and not source_content:
                 self.call_from_thread(self._set_status, "Provide prompt files or requirements text")
@@ -569,13 +640,28 @@ class AcapTuiApp(App[list[str] | None]):
             self.handoff_command = cmd
             self.call_from_thread(self._set_phase, PromptFlowPhase.HANDOFF, "done", "Press H to hand off to native coding agent TUI")
             self.call_from_thread(self._append_log, "[handoff] " + " ".join(cmd))
+            self.call_from_thread(
+                self._log_event,
+                PromptFlowPhase.HANDOFF.value,
+                "control",
+                "handoff_command_ready",
+                None,
+                {"command": " ".join(cmd)},
+            )
         except Exception as exc:
             self.call_from_thread(self._set_status, f"Error: {exc}")
             self.call_from_thread(self._append_log, f"[error] {exc}")
+            self.call_from_thread(
+                self._log_event,
+                self.current_stream_phase,
+                "error",
+                str(exc),
+            )
 
     @work(thread=True, exclusive=True)
     def run_configure_worker(self) -> None:
         _, _, provider, model, project_dir = self._resolve_inputs()
+        self._ensure_run_logger(provider, model, project_dir)
         try:
             self.call_from_thread(self._set_phase, PromptFlowPhase.CONFIGURE, "running", "Detecting stack")
             asyncio.run(
@@ -591,9 +677,90 @@ class AcapTuiApp(App[list[str] | None]):
             self.handoff_command = cmd
             self.call_from_thread(self._set_phase, PromptFlowPhase.HANDOFF, "done", "Press H to hand off to native coding agent TUI")
             self.call_from_thread(self._append_log, "[handoff] " + " ".join(cmd))
+            self.call_from_thread(
+                self._log_event,
+                PromptFlowPhase.HANDOFF.value,
+                "control",
+                "handoff_command_ready",
+                None,
+                {"command": " ".join(cmd)},
+            )
         except Exception as exc:
             self.call_from_thread(self._set_status, f"Error: {exc}")
             self.call_from_thread(self._append_log, f"[error] {exc}")
+            self.call_from_thread(
+                self._log_event,
+                PromptFlowPhase.CONFIGURE.value,
+                "error",
+                str(exc),
+            )
+
+
+def run_handoff_command_with_logging(
+    handoff_command: list[str],
+    run_logger: RunLogger | None,
+) -> int:
+    """Stream handoff command output to terminal and structured JSONL log."""
+    if run_logger is not None:
+        run_logger.log_event(
+            phase="agent",
+            event_type="lifecycle",
+            message="handoff_started",
+            meta={"command": " ".join(handoff_command)},
+        )
+
+    proc = subprocess.Popen(
+        handoff_command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    q: queue.Queue[tuple[str, str | None]] = queue.Queue()
+
+    def _reader(stream_name: str, handle: object | None) -> None:
+        if handle is None:
+            q.put((stream_name, None))
+            return
+        for line in handle:
+            q.put((stream_name, line))
+        q.put((stream_name, None))
+
+    threads = [
+        threading.Thread(target=_reader, args=("stdout", proc.stdout), daemon=True),
+        threading.Thread(target=_reader, args=("stderr", proc.stderr), daemon=True),
+    ]
+    for t in threads:
+        t.start()
+
+    completed_streams = 0
+    while completed_streams < 2:
+        stream_name, line = q.get()
+        if line is None:
+            completed_streams += 1
+            continue
+        text = line.rstrip("\n")
+        if stream_name == "stdout":
+            print(text, flush=True)
+        else:
+            print(text, file=sys.stderr, flush=True)
+        if run_logger is not None:
+            run_logger.log_event(
+                phase="agent",
+                event_type="stream",
+                message=text,
+                stream=stream_name,
+            )
+
+    return_code = proc.wait()
+    if run_logger is not None:
+        run_logger.log_event(
+            phase="agent",
+            event_type="lifecycle",
+            message="handoff_finished",
+            meta={"return_code": str(return_code)},
+        )
+    return return_code
 
 
 def parse_args() -> argparse.Namespace:
@@ -611,7 +778,7 @@ def main() -> None:
     app = AcapTuiApp(args)
     handoff_command = app.run()
     if handoff_command:
-        subprocess.run(handoff_command, check=False)
+        run_handoff_command_with_logging(handoff_command, app.run_logger)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ venv/
 
 # Generated output
 generations/
+logs/
 
 # Editor
 .idea/
