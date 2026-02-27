@@ -13,6 +13,11 @@ venv/
 # Generated output
 generations/
 logs/
+.sidecar/
+
+# Project docs
+AGENTS.md
+docs/*
 
 # Editor
 .idea/
