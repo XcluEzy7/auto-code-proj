@@ -17,9 +17,8 @@ Or standalone:
 """
 
 import asyncio
+import subprocess
 from pathlib import Path
-
-from claude_code_sdk import ClaudeCodeOptions, ClaudeSDKClient
 
 from configure import extract_json_from_text
 
@@ -151,35 +150,28 @@ async def run_analysis_session(content: str, model: str) -> dict:
         "Output ONLY a valid JSON object as described in your instructions."
     )
 
-    client = ClaudeSDKClient(
-        options=ClaudeCodeOptions(
-            model=model,
-            system_prompt=ANALYSIS_SYSTEM_PROMPT,
-            allowed_tools=[],
-            max_turns=5,
-            cwd=str(Path.cwd()),
-        )
+    result = subprocess.run(
+        [
+            "claude", "-p",
+            "--model", model,
+            "--allowedTools", "Edit,Bash,Task",
+            "--system-prompt", ANALYSIS_SYSTEM_PROMPT,
+        ],
+        input=query,
+        capture_output=True,
+        text=True,
     )
 
-    collected_text = ""
+    if result.returncode != 0:
+        error_msg = result.stderr[:500] if result.stderr else "(no stderr)"
+        raise RuntimeError(f"Analysis failed: {error_msg}")
 
-    async with client:
-        await client.query(query)
+    result_data = extract_json_from_text(result.stdout)
 
-        async for msg in client.receive_response():
-            msg_type = type(msg).__name__
-            if msg_type == "AssistantMessage" and hasattr(msg, "content"):
-                for block in msg.content:
-                    block_type = type(block).__name__
-                    if block_type == "TextBlock" and hasattr(block, "text"):
-                        collected_text += block.text
+    print(f"Analysis: {result_data.get('analysis', '?')}")
+    print(f"Questions identified: {len(result_data.get('questions', []))}\n")
 
-    result = extract_json_from_text(collected_text)
-
-    print(f"Analysis: {result.get('analysis', '?')}")
-    print(f"Questions identified: {len(result.get('questions', []))}\n")
-
-    return result
+    return result_data
 
 
 def conduct_qa(questions: list[dict]) -> list[dict]:
@@ -283,35 +275,22 @@ async def run_generation_session(
         "Output ONLY a valid JSON object with keys: app_spec, initializer_prompt, coding_prompt."
     )
 
-    client = ClaudeSDKClient(
-        options=ClaudeCodeOptions(
-            model=model,
-            system_prompt=GENERATION_SYSTEM_PROMPT,
-            allowed_tools=[],
-            max_turns=10,
-            cwd=str(Path.cwd()),
-        )
+    result = subprocess.run(
+        [
+            "claude", "-p",
+            "--model", model,
+            "--allowedTools", "Edit,Bash,Task",
+            "--system-prompt", GENERATION_SYSTEM_PROMPT,
+        ],
+        input=query,
+        capture_output=True,
+        text=True,
     )
 
-    collected_text = ""
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[:500] or "(no stderr)")
 
-    async with client:
-        await client.query(query)
-
-        async for msg in client.receive_response():
-            msg_type = type(msg).__name__
-            if msg_type == "AssistantMessage" and hasattr(msg, "content"):
-                for block in msg.content:
-                    block_type = type(block).__name__
-                    if block_type == "TextBlock" and hasattr(block, "text"):
-                        collected_text += block.text
-                        # Show progress without printing raw JSON
-                        if not block.text.strip().startswith("{"):
-                            print(block.text, end="", flush=True)
-
-    print("\n")
-
-    return extract_json_from_text(collected_text)
+    return extract_json_from_text(result.stdout)
 
 
 def write_prompt_files(
@@ -363,7 +342,7 @@ async def run_prompter(
     analysis_model: str | None = None,
     generation_model: str | None = None,
     overwrite: bool = False,
-) -> None:
+) -> bool:
     """
     Orchestrate all five phases of the prompt wizard.
 
@@ -392,14 +371,14 @@ async def run_prompter(
         content = collect_source_documents(prompt_files)
     except (ValueError, FileNotFoundError) as e:
         print(f"\nError: {e}")
-        return
+        return False
 
     # Phase 2: Analysis session
     try:
         analysis_result = await run_analysis_session(content, analysis_model)
     except Exception as e:
         print(f"\nError during analysis: {e}")
-        return
+        return False
 
     questions = analysis_result.get("questions", [])
 
@@ -411,10 +390,11 @@ async def run_prompter(
         generated = await run_generation_session(content, qa_pairs, generation_model)
     except Exception as e:
         print(f"\nError during generation: {e}")
-        return
+        return False
 
     # Phase 5: Write files
     write_prompt_files(generated, prompts_dir, overwrite=overwrite)
+    return True
 
 
 if __name__ == "__main__":

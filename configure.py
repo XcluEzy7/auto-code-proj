@@ -17,9 +17,8 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
-
-from claude_code_sdk import ClaudeCodeOptions, ClaudeSDKClient
 
 
 # Hardcoded defaults for paths — .env doesn't exist yet when this runs
@@ -197,7 +196,7 @@ async def run_configure(
     """
     Run the configuration detection agent.
 
-    Reads prompts/ files via claude-code-sdk with Read+Glob only (no Bash),
+    Reads prompts/ files via claude -p headless CLI,
     extracts detected config as JSON, writes .env, and returns the config dict.
 
     Args:
@@ -208,58 +207,30 @@ async def run_configure(
     Returns:
         Dict of detected configuration values.
     """
-    # Resolve model: argument > env var > default
-    if configure_model is None:
-        configure_model = os.environ.get(
-            "CONFIGURE_MODEL", "claude-haiku-4-5-20251001"
-        )
+    model = configure_model or os.environ.get("CONFIGURE_MODEL", "claude-haiku-4-5-20251001")
 
-    print(f"\nRunning configure agent (model: {configure_model})...")
-    print(f"Reading prompts from: {prompts_dir}/")
+    print(f"\n[Configure] Detecting tech stack with {model}...\n")
 
-    client = ClaudeSDKClient(
-        options=ClaudeCodeOptions(
-            model=configure_model,
-            system_prompt=CONFIGURE_SYSTEM_PROMPT,
-            # Read-only tools — no Bash, no Edit, no Write
-            allowed_tools=["Read", "Glob"],
-            max_turns=10,
-            cwd=str(Path.cwd()),
-        )
+    result = subprocess.run(
+        [
+            "claude", "-p",
+            "--model", model,
+            "--allowedTools", "Read,Glob,Edit,Bash,Task",
+            "--system-prompt", CONFIGURE_SYSTEM_PROMPT,
+        ],
+        input=build_configure_prompt(prompts_dir),
+        capture_output=True,
+        text=True,
+        cwd=str(Path.cwd()),
     )
 
-    collected_text = ""
+    if result.returncode != 0:
+        error_msg = result.stderr[:500] if result.stderr else "(no stderr)"
+        raise RuntimeError(f"Configure agent failed: {error_msg}")
 
-    async with client:
-        await client.query(build_configure_prompt(prompts_dir))
-
-        async for msg in client.receive_response():
-            msg_type = type(msg).__name__
-
-            if msg_type == "AssistantMessage" and hasattr(msg, "content"):
-                for block in msg.content:
-                    block_type = type(block).__name__
-                    if block_type == "TextBlock" and hasattr(block, "text"):
-                        collected_text += block.text
-                        # Show progress without printing raw JSON
-                        if not block.text.strip().startswith("{"):
-                            print(block.text, end="", flush=True)
-
-    print("\n")
-
-    # Extract and validate JSON
-    config_data = extract_json_from_text(collected_text)
-
-    # Write .env file
+    config_data = extract_json_from_text(result.stdout)
     env_path = write_env_file(config_data)
-    print(f"✓ Configuration written to: {env_path}")
-    print(f"  Framework:       {config_data.get('framework', '?')}")
-    print(f"  Package manager: {config_data.get('package_manager', '?')}")
-    print(f"  Dev server:      {config_data.get('dev_server_cmd', '?')} "
-          f"(port {config_data.get('dev_server_port', '?')})")
-    print(f"  Claude model:    {config_data.get('claude_model', '?')}")
-    print()
-
+    print(f"\n✓ Configuration written to: {env_path}")
     return config_data
 
 

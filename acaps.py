@@ -133,11 +133,13 @@ def main() -> None:
     async def _run() -> None:
         # Step 0: Run prompt wizard if requested
         if args.prompt:
-            await run_prompter(
+            success = await run_prompter(
                 prompt_files=args.prompt_files,
                 generation_model=args.model or get_config().claude_model,
                 overwrite=args.prompt_overwrite,
             )
+            if not success:
+                return
             print("Prompt files generated. You can now run --configure to detect the stack.\n")
             # If --configure not also passed, stop here
             if not args.configure:
