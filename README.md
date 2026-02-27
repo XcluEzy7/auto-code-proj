@@ -160,6 +160,34 @@ By default, the generated app is a Turborepo monorepo using Bun, with a pnpm fal
 
 ---
 
+## Textual TUI (Prep Flow)
+
+You can run a keyboard-first Textual interface for prompt generation and configuration:
+
+```bash
+uv run python3 tui_app.py
+```
+
+Optional startup flags:
+
+```bash
+uv run python3 tui_app.py \
+  --prompt-files ./my_prd.txt \
+  --project-dir ./my_project \
+  --agent-cli codex \
+  --model gpt-5-codex
+```
+
+Inside the TUI:
+- `Up/Down` + `Enter` navigate menus
+- `L` toggles phase view vs streaming output log pane
+- `H` hands off to the coding agent command after prep completes
+- `Q` quits
+
+The TUI is additive: existing `acaps.py --prompt`, `--configure`, and full-run CLI flows remain unchanged.
+
+---
+
 ## How It Works
 
 ### Prompt Wizard (`--prompt`)

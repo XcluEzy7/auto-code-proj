@@ -18,6 +18,7 @@ Or standalone:
 
 import asyncio
 from pathlib import Path
+from typing import Callable
 
 from config import get_config
 from configure import extract_json_from_text
@@ -27,6 +28,8 @@ from provider_cli import provider_default_model, run_prompt_task
 DEFAULT_ANALYSIS_MODEL = "claude-haiku-4-5-20251001"
 DEFAULT_GENERATION_MODEL = "claude-sonnet-4-6"
 GENERATION_REQUIRED_KEYS = {"app_spec", "initializer_prompt", "coding_prompt"}
+StatusCallback = Callable[[str, str], None]
+StreamCallback = Callable[[str, str], None]
 
 ANALYSIS_SYSTEM_PROMPT = """\
 You are a technical architect analyzing product requirements documents.
@@ -139,7 +142,13 @@ def collect_source_documents(prompt_files: list[str] | None) -> str:
     return result
 
 
-async def run_analysis_session(content: str, model: str, provider_id: str) -> dict:
+async def run_analysis_session(
+    content: str,
+    model: str,
+    provider_id: str,
+    status_callback: StatusCallback | None = None,
+    stream_callback: StreamCallback | None = None,
+) -> dict:
     """
     Phase 2: AI analysis session — understand requirements, generate clarifying questions.
 
@@ -155,6 +164,8 @@ async def run_analysis_session(content: str, model: str, provider_id: str) -> di
     print("=" * 60)
     print(f"Model: {model}")
     print("Identifying gaps and generating clarifying questions...\n")
+    if status_callback:
+        status_callback("analyze", "Identifying gaps and generating clarifying questions")
 
     query = (
         "Please analyze the following requirements document and generate clarifying questions.\n\n"
@@ -171,6 +182,7 @@ async def run_analysis_session(content: str, model: str, provider_id: str) -> di
         cwd=Path.cwd(),
         cfg=cfg,
         allowed_tools="Edit,Bash,Task",
+        stream_callback=stream_callback,
     )
 
     if result.returncode != 0:
@@ -185,7 +197,7 @@ async def run_analysis_session(content: str, model: str, provider_id: str) -> di
     return result_data
 
 
-def conduct_qa(questions: list[dict]) -> list[dict]:
+def conduct_qa(questions: list[dict], answers: list[str] | None = None) -> list[dict]:
     """
     Phase 3: Interactive Q&A — ask each question and collect user answers.
 
@@ -201,6 +213,7 @@ def conduct_qa(questions: list[dict]) -> list[dict]:
     print("Please answer the following questions (press Enter to skip):\n")
 
     qa_pairs = []
+    provided_answers = answers or []
     for i, q in enumerate(questions, 1):
         question = q.get("question", "")
         why = q.get("why", "")
@@ -209,10 +222,14 @@ def conduct_qa(questions: list[dict]) -> list[dict]:
         if why:
             print(f"     (Why: {why})")
 
-        try:
-            answer = input("A: ").strip()
-        except EOFError:
-            answer = ""
+        if i - 1 < len(provided_answers):
+            answer = provided_answers[i - 1].strip()
+            print(f"A: {answer}")
+        else:
+            try:
+                answer = input("A: ").strip()
+            except EOFError:
+                answer = ""
 
         qa_pairs.append({"question": question, "answer": answer})
         print()
@@ -229,7 +246,12 @@ def _load_template(filename: str) -> str:
 
 
 async def run_generation_session(
-    content: str, qa_pairs: list[dict], model: str, provider_id: str
+    content: str,
+    qa_pairs: list[dict],
+    model: str,
+    provider_id: str,
+    status_callback: StatusCallback | None = None,
+    stream_callback: StreamCallback | None = None,
 ) -> dict:
     """
     Phase 4: AI generation session — produce all three prompt files.
@@ -247,6 +269,8 @@ async def run_generation_session(
     print("=" * 60)
     print(f"Model: {model}")
     print("Generating app_spec.txt, initializer_prompt.md, coding_prompt.md...\n")
+    if status_callback:
+        status_callback("generate", "Generating app_spec.txt, initializer_prompt.md, coding_prompt.md")
 
     # Load template examples from the existing prompts/ directory
     initializer_template = _load_template("initializer_prompt.md")
@@ -301,6 +325,7 @@ async def run_generation_session(
         cwd=Path.cwd(),
         cfg=cfg,
         allowed_tools="Edit,Bash,Task",
+        stream_callback=stream_callback,
     )
 
     if result.returncode != 0:
@@ -336,6 +361,7 @@ async def run_generation_session(
             cwd=Path.cwd(),
             cfg=cfg,
             allowed_tools="Edit,Bash,Task",
+            stream_callback=stream_callback,
         )
 
         if retry_result.returncode != 0:
@@ -359,7 +385,10 @@ async def run_generation_session(
 
 
 def write_prompt_files(
-    generated: dict, prompts_dir: Path, overwrite: bool = False
+    generated: dict,
+    prompts_dir: Path,
+    overwrite: bool = False,
+    status_callback: StatusCallback | None = None,
 ) -> None:
     """
     Phase 5: Write the generated files to disk.
@@ -374,6 +403,8 @@ def write_prompt_files(
     print("\n" + "=" * 60)
     print("PHASE 5 — Writing Files")
     print("=" * 60)
+    if status_callback:
+        status_callback("write", "Writing generated prompt files")
 
     prompts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -394,10 +425,14 @@ def write_prompt_files(
                 f"  WARNING: {path} already exists. "
                 "Use --prompt-overwrite to overwrite."
             )
+            if status_callback:
+                status_callback("write", f"Skipped existing file: {path}")
             continue
 
         path.write_text(file_content, encoding="utf-8")
         print(f"  Written: {path}")
+        if status_callback:
+            status_callback("write", f"Written: {path}")
 
     print()
 
@@ -408,6 +443,10 @@ async def run_prompter(
     generation_model: str | None = None,
     overwrite: bool = False,
     provider_id: str | None = None,
+    source_content: str | None = None,
+    qa_answers: list[str] | None = None,
+    status_callback: StatusCallback | None = None,
+    stream_callback: StreamCallback | None = None,
 ) -> bool:
     """
     Orchestrate all five phases of the prompt wizard.
@@ -436,14 +475,22 @@ async def run_prompter(
 
     # Phase 1: Collect source documents
     try:
-        content = collect_source_documents(prompt_files)
+        content = source_content if source_content is not None else collect_source_documents(prompt_files)
+        if not content.strip():
+            raise ValueError("No requirements provided. Please provide a requirements document.")
     except (ValueError, FileNotFoundError) as e:
         print(f"\nError: {e}")
         return False
 
     # Phase 2: Analysis session
     try:
-        analysis_result = await run_analysis_session(content, analysis_model, provider)
+        analysis_result = await run_analysis_session(
+            content,
+            analysis_model,
+            provider,
+            status_callback=status_callback,
+            stream_callback=stream_callback,
+        )
     except Exception as e:
         print(f"\nError during analysis: {e}")
         return False
@@ -451,17 +498,29 @@ async def run_prompter(
     questions = analysis_result.get("questions", [])
 
     # Phase 3: Q&A with user
-    qa_pairs = conduct_qa(questions) if questions else []
+    qa_pairs = conduct_qa(questions, answers=qa_answers) if questions else []
 
     # Phase 4: Generation session
     try:
-        generated = await run_generation_session(content, qa_pairs, generation_model, provider)
+        generated = await run_generation_session(
+            content,
+            qa_pairs,
+            generation_model,
+            provider,
+            status_callback=status_callback,
+            stream_callback=stream_callback,
+        )
     except Exception as e:
         print(f"\nError during generation: {e}")
         return False
 
     # Phase 5: Write files
-    write_prompt_files(generated, prompts_dir, overwrite=overwrite)
+    write_prompt_files(
+        generated,
+        prompts_dir,
+        overwrite=overwrite,
+        status_callback=status_callback,
+    )
     return True
 
 

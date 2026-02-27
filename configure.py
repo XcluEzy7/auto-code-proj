@@ -17,6 +17,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from typing import Callable
 
 from config import get_config
 from provider_cli import provider_default_model, run_prompt_task
@@ -65,6 +66,9 @@ The agent_system_prompt should be specific to the detected stack. For example:
 
 Output ONLY the JSON object, starting with { and ending with }. No other text.
 """
+
+StatusCallback = Callable[[str, str], None]
+StreamCallback = Callable[[str, str], None]
 
 
 def build_configure_prompt(prompts_dir: str) -> str:
@@ -290,6 +294,8 @@ async def run_configure(
     configure_model: str | None = None,
     prompts_dir: str = DEFAULT_PROMPTS_DIR,
     provider_id: str | None = None,
+    status_callback: StatusCallback | None = None,
+    stream_callback: StreamCallback | None = None,
 ) -> dict:
     """
     Run the configuration detection agent.
@@ -314,6 +320,8 @@ async def run_configure(
     )
 
     print(f"\n[Configure] Detecting tech stack with {model} via {provider}...\n")
+    if status_callback:
+        status_callback("configure", f"Detecting tech stack with {model} via {provider}")
 
     result = run_prompt_task(
         provider_id=provider,
@@ -323,6 +331,7 @@ async def run_configure(
         cwd=Path.cwd(),
         cfg=cfg,
         allowed_tools="Read,Glob,Edit,Bash,Task",
+        stream_callback=stream_callback,
     )
 
     if result.returncode != 0:
@@ -332,6 +341,8 @@ async def run_configure(
     config_data = extract_json_from_text(result.stdout)
     env_path = write_env_file(config_data)
     print(f"\n✓ Configuration written to: {env_path}")
+    if status_callback:
+        status_callback("configure", f"Configuration written to: {env_path}")
     return config_data
 
 

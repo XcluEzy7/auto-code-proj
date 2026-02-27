@@ -11,9 +11,11 @@ import subprocess
 import sys
 import os
 import re
+import threading
+import queue
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from config import ProjectConfig, VALID_PROVIDER_IDS, normalize_provider_id
 
@@ -76,6 +78,84 @@ INSTALL_HINTS: dict[str, str] = {
     "omp": "Install/setup Oh-My-Pi CLI: https://github.com/can1357/oh-my-pi?tab=readme-ov-file#cli-reference",
     "opencode": "Install/setup Opencode CLI: https://opencode.ai/docs/cli/",
 }
+
+
+StreamCallback = Callable[[str, str], None]
+
+
+def _run_command_with_streaming(
+    cmd: list[str],
+    cwd: Path,
+    input_text: str | None = None,
+    on_stream: StreamCallback | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """
+    Run a command and optionally stream stdout/stderr lines to a callback.
+
+    Callback signature: callback(stream_name, line_text)
+    where stream_name is "stdout" or "stderr".
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE if input_text is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(cwd),
+        bufsize=1,
+    )
+
+    if input_text is not None and proc.stdin is not None:
+        proc.stdin.write(input_text)
+        proc.stdin.close()
+
+    q: queue.Queue[tuple[str, str | None]] = queue.Queue()
+    out_lines: list[str] = []
+    err_lines: list[str] = []
+
+    def _reader(stream_name: str, handle: Optional[object]) -> None:
+        if handle is None:
+            q.put((stream_name, None))
+            return
+        for line in handle:
+            q.put((stream_name, line))
+        q.put((stream_name, None))
+
+    threads = [
+        threading.Thread(
+            target=_reader,
+            args=("stdout", proc.stdout),
+            daemon=True,
+        ),
+        threading.Thread(
+            target=_reader,
+            args=("stderr", proc.stderr),
+            daemon=True,
+        ),
+    ]
+    for t in threads:
+        t.start()
+
+    completed_streams = 0
+    while completed_streams < 2:
+        stream_name, line = q.get()
+        if line is None:
+            completed_streams += 1
+            continue
+        if stream_name == "stdout":
+            out_lines.append(line)
+        else:
+            err_lines.append(line)
+        if on_stream is not None:
+            on_stream(stream_name, line.rstrip("\n"))
+
+    returncode = proc.wait()
+    return subprocess.CompletedProcess(
+        args=cmd,
+        returncode=returncode,
+        stdout="".join(out_lines),
+        stderr="".join(err_lines),
+    )
 
 
 def provider_binary(provider_id: str, cfg: ProjectConfig) -> str:
@@ -391,6 +471,7 @@ def run_prompt_task(
     cwd: Path,
     cfg: ProjectConfig,
     allowed_tools: str = "Edit,Bash,Task",
+    stream_callback: StreamCallback | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """
     Run a one-shot prompt task across providers (analysis/config/generation).
@@ -401,21 +482,29 @@ def run_prompt_task(
     require_json = cfg.agent_cli_require_json_output
 
     if provider_id == "claude":
-        return subprocess.run(
-            [
-                binary,
-                "-p",
-                "--model",
-                model,
-                "--allowedTools",
-                allowed_tools,
-                "--system-prompt",
-                system_prompt,
-            ],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            cwd=str(cwd),
+        cmd = [
+            binary,
+            "-p",
+            "--model",
+            model,
+            "--allowedTools",
+            allowed_tools,
+            "--system-prompt",
+            system_prompt,
+        ]
+        if stream_callback is None:
+            return subprocess.run(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                cwd=str(cwd),
+            )
+        return _run_command_with_streaming(
+            cmd=cmd,
+            cwd=cwd,
+            input_text=prompt,
+            on_stream=stream_callback,
         )
 
     query = prompt
@@ -443,11 +532,18 @@ def run_prompt_task(
     else:
         cmd = [binary, "run", query, "--model", model, "--format", "json"]
 
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        cwd=str(cwd),
+    if stream_callback is None:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=str(cwd),
+        )
+
+    return _run_command_with_streaming(
+        cmd=cmd,
+        cwd=cwd,
+        on_stream=stream_callback,
     )
 
 
