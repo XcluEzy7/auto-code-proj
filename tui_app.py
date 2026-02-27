@@ -13,7 +13,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import Footer, Header, Input, RichLog, Static
+from textual.widgets import Button, Footer, Header, Input, RichLog, Static
 
 from config import get_config
 from configure import run_configure
@@ -43,6 +43,26 @@ class AcapTuiApp(App[list[str] | None]):
       border: round #9f6;
       padding: 1;
     }
+    #controls {
+      border: round #666;
+      padding: 1;
+      margin-bottom: 1;
+    }
+    #menu_buttons {
+      margin-top: 1;
+      height: 3;
+    }
+    #menu_buttons Button {
+      margin-right: 1;
+    }
+    #form_box {
+      border: round #444;
+      padding: 1;
+      margin-bottom: 1;
+    }
+    .field {
+      margin-top: 1;
+    }
     #menu {
       height: 8;
       margin-bottom: 1;
@@ -66,10 +86,17 @@ class AcapTuiApp(App[list[str] | None]):
       border: round #ccc;
       padding: 1;
       margin-bottom: 1;
-      height: 10;
+      height: 14;
     }
     #qa_answer {
       margin-top: 1;
+    }
+    #qa_buttons {
+      height: 3;
+      margin-top: 1;
+    }
+    #qa_buttons Button {
+      margin-right: 1;
     }
     #logs.hidden {
       display: none;
@@ -142,34 +169,54 @@ class AcapTuiApp(App[list[str] | None]):
                     "Menu mode: arrows + Enter. Press E to edit fields, L for logs.",
                     id="status",
                 )
-                yield Input(
-                    value=" ".join(self.args.prompt_files or []),
-                    placeholder="Prompt source files (space separated)",
-                    id="prompt_files",
-                )
-                yield Input(
-                    value=str(self.args.project_dir),
-                    placeholder="Project dir",
-                    id="project_dir",
-                )
-                yield Input(
-                    value=self.args.agent_cli or self.cfg.agent_cli_id,
-                    placeholder="Provider: claude|codex|omp|opencode",
-                    id="provider_id",
-                )
-                default_model = self.args.model or provider_default_model(
-                    self.args.agent_cli or self.cfg.agent_cli_id,
-                    self.cfg,
-                )
-                yield Input(value=default_model, placeholder="Model", id="model_id")
-                yield Input(
-                    placeholder="Paste requirements text here (disabled when prompt files are set)",
-                    id="req_input",
-                )
+                with Vertical(id="controls"):
+                    yield Static("[b]Actions[/b]")
+                    with Horizontal(id="menu_buttons"):
+                        yield Button("Start End-to-End", id="btn_start", variant="success")
+                        yield Button("Prompt Only", id="btn_prompt_only")
+                        yield Button("Configure Only", id="btn_configure_only")
+                        yield Button("Quit", id="btn_quit", variant="error")
+
+                with Vertical(id="form_box"):
+                    yield Static("[b]Run Settings[/b]")
+                    yield Static("Prompt source files", classes="field")
+                    yield Input(
+                        value=" ".join(self.args.prompt_files or []),
+                        placeholder="space separated file paths",
+                        id="prompt_files",
+                    )
+                    yield Static("Project directory", classes="field")
+                    yield Input(
+                        value=str(self.args.project_dir),
+                        placeholder="Project dir",
+                        id="project_dir",
+                    )
+                    yield Static("Provider", classes="field")
+                    yield Input(
+                        value=self.args.agent_cli or self.cfg.agent_cli_id,
+                        placeholder="claude|codex|omp|opencode",
+                        id="provider_id",
+                    )
+                    default_model = self.args.model or provider_default_model(
+                        self.args.agent_cli or self.cfg.agent_cli_id,
+                        self.cfg,
+                    )
+                    yield Static("Model", classes="field")
+                    yield Input(value=default_model, placeholder="Model", id="model_id")
+                    yield Static("Requirements text", classes="field")
+                    yield Input(
+                        placeholder="Paste requirements (hidden when files are set)",
+                        id="req_input",
+                    )
+
                 with Vertical(id="qa_box"):
                     yield Static("", id="qa_title")
                     yield Static("", id="qa_why")
                     yield Input(placeholder="Type answer and press Enter to save", id="qa_answer")
+                    with Horizontal(id="qa_buttons"):
+                        yield Button("Prev", id="btn_qa_prev")
+                        yield Button("Save+Next", id="btn_qa_next", variant="primary")
+                        yield Button("Submit", id="btn_qa_submit", variant="success")
                 log = RichLog(id="logs")
                 log.add_class("hidden")
                 yield log
@@ -186,6 +233,35 @@ class AcapTuiApp(App[list[str] | None]):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "prompt_files":
             self._refresh_source_mode()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "qa_answer" and self.qa_mode:
+            self._save_current_answer()
+            self.action_qa_next()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id
+        if button_id == "btn_start":
+            self.run_flow_worker(include_configure=True)
+            return
+        if button_id == "btn_prompt_only":
+            self.run_flow_worker(include_configure=False)
+            return
+        if button_id == "btn_configure_only":
+            self.run_configure_worker()
+            return
+        if button_id == "btn_quit":
+            self.exit(None)
+            return
+        if button_id == "btn_qa_prev":
+            self.action_qa_prev()
+            return
+        if button_id == "btn_qa_next":
+            self._save_current_answer()
+            self.action_qa_next()
+            return
+        if button_id == "btn_qa_submit":
+            self.action_qa_submit()
 
     def _refresh_source_mode(self) -> None:
         prompt_files = self.query_one("#prompt_files", Input).value.strip()

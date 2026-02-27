@@ -186,6 +186,7 @@ Inside the TUI:
 - `L` toggles phase view vs streaming output log pane
 - `H` hands off to the coding agent command after prep completes
 - `Q` quits
+- Clickable action buttons are available for start/prompt-only/configure-only/quit and Q&A controls.
 
 If `--prompt-files` are provided, the requirements textbox is hidden and those files are treated as source of truth. The TUI then focuses on clarifying question refinement.
 
