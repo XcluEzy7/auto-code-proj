@@ -1,35 +1,70 @@
-# Autonomous Coding Agent Demo
+# ACAP System — Autonomous Coding Agent Prep System
 
-A minimal harness demonstrating long-running autonomous coding with the Claude Agent SDK. This demo implements a two-agent pattern (initializer + coding agent) that can build complete applications over multiple sessions.
+ACAP is a production harness for long-running autonomous coding with the Claude Agent SDK. It implements a two-agent pattern (initializer + coding agent) that builds complete applications over many sessions, driven entirely by your requirements document.
 
 ## Prerequisites
 
-**Required:** Install the latest versions of both Claude Code and the Claude Agent SDK:
+### 1. Install Claude Code
 
+Choose the method that suits your platform.
+
+**macOS / Linux / WSL (Recommended — auto-updates):**
 ```bash
-# Install Claude Code CLI (latest version required)
-npm install -g @anthropic-ai/claude-code
-
-# Install Python dependencies
-pip install -r requirements.txt
+curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-Verify your installations:
-```bash
-claude --version  # Should be latest version
-pip show claude-code-sdk  # Check SDK is installed
+**Windows PowerShell (auto-updates):**
+```powershell
+irm https://claude.ai/install.ps1 | iex
 ```
 
-**Authentication:** Log in once via the Claude Code CLI:
+**Windows CMD:**
+```batch
+curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
+```
+> Windows requires [Git for Windows](https://git-scm.com/downloads/win).
+
+**Homebrew (macOS/Linux):**
+```bash
+brew install --cask claude-code
+# Run `brew upgrade claude-code` periodically — Homebrew does not auto-update.
+```
+
+**WinGet (Windows):**
+```powershell
+winget install Anthropic.ClaudeCode
+# Run `winget upgrade Anthropic.ClaudeCode` periodically — WinGet does not auto-update.
+```
+
+**VS Code / Cursor:**
+Install the [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code) from the marketplace, or search for "Claude Code" in the Extensions view (`Cmd+Shift+X` / `Ctrl+Shift+X`).
+
+**JetBrains IDEs (IntelliJ, PyCharm, WebStorm, etc.):**
+Install the [Claude Code plugin](https://plugins.jetbrains.com/plugin/27310-claude-code-beta-) from the JetBrains Marketplace, then restart your IDE.
+
+Verify your installation:
+```bash
+claude --version
+```
+
+### 2. Authenticate
+
+Log in once — credentials are stored and used by all ACAP scripts automatically:
 ```bash
 claude login
 ```
 
-This stores credentials that all scripts use automatically. No `ANTHROPIC_API_KEY` environment variable is needed.
+### 3. Install Python dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
 
 ## Quick Start
 
-**New to this tool?** Use the prompt wizard to generate your `prompts/` files from a PRD or product brief:
+**Step 1 — Generate your `prompts/` files from a PRD or product brief:**
 
 ```bash
 # Interactive — paste your requirements, answer a few questions:
@@ -39,61 +74,57 @@ python autonomous_agent_demo.py --prompt
 python autonomous_agent_demo.py --prompt --prompt-files ./my_prd.txt
 ```
 
-Then run the full pipeline:
+**Step 2 — Detect your tech stack and write `.env`:**
+
 ```bash
-python autonomous_agent_demo.py --project-dir ./my_project --configure
+python autonomous_agent_demo.py --configure --project-dir ./my_project
 ```
 
-Or do it all in one command:
+**Step 3 — Run the coding agents:**
+
+```bash
+python autonomous_agent_demo.py --project-dir ./my_project
+```
+
+Or run the full pipeline in one command:
 ```bash
 python autonomous_agent_demo.py --prompt --prompt-files ./my_prd.txt \
     --configure --project-dir ./my_project
 ```
 
-For testing with limited iterations:
-```bash
-python autonomous_agent_demo.py --project-dir ./my_project --max-iterations 3
-```
-
-## Important Timing Expectations
-
-> **Warning: This demo takes a long time to run!**
-
-- **First session (initialization):** The agent generates a `feature_list.json` with 200 test cases. This takes several minutes and may appear to hang - this is normal. The agent is writing out all the features.
-
-- **Subsequent sessions:** Each coding iteration can take **5-15 minutes** depending on complexity.
-
-- **Full app:** Building all 200 features typically requires **many hours** of total runtime across multiple sessions.
-
-**Tip:** The 200 features parameter in the prompts is designed for comprehensive coverage. If you want faster demos, you can modify `prompts/initializer_prompt.md` to reduce the feature count (e.g., 20-50 features for a quicker demo).
+---
 
 ## How It Works
 
-### Two-Agent Pattern
+### Prompt Wizard (`--prompt`)
 
-1. **Initializer Agent (Session 1):** Reads `app_spec.txt`, creates `feature_list.json` with 200 test cases, sets up project structure, and initializes git.
+Before any coding begins, the wizard turns your raw requirements into the three structured files the agents need:
 
-2. **Coding Agent (Sessions 2+):** Picks up where the previous session left off, implements features one by one, and marks them as passing in `feature_list.json`.
+1. **Collect** — reads from `--prompt-files` or accepts pasted text interactively
+2. **Analyze** — a fast AI analysis identifies gaps and generates 3–7 clarifying questions
+3. **Q&A** — you answer the questions in the terminal (Enter to skip any)
+4. **Generate** — a capable AI session produces all three files following the harness templates
+5. **Write** — `prompts/app_spec.txt`, `prompts/initializer_prompt.md`, `prompts/coding_prompt.md` are written to disk
+
+Use `--prompt-overwrite` to replace existing files.
 
 ### Stack Detection (`--configure`)
 
-Before the coding agents run, `--configure` reads your `prompts/` files and auto-detects the tech stack to write a `.env` configuration file. This saves you from manually figuring out the right dev server command, port, package manager, and agent system prompt for your stack.
+Reads your `prompts/` files and auto-detects the tech stack to write a `.env` configuration file — so you don't have to manually figure out the dev server command, port, package manager, or agent system prompt.
 
-```bash
-# Detect stack and write .env, then start coding:
-python autonomous_agent_demo.py --configure --project-dir ./my_project
-
-# Regenerate .env after editing prompts/:
-python autonomous_agent_demo.py --configure
-```
-
-The configure agent reads `prompts/app_spec.txt` and outputs values like:
+Key values written to `.env`:
 - `FRAMEWORK` — e.g. `laravel`, `django`, `react`, `generic`
 - `PACKAGE_MANAGER` — e.g. `npm`, `pip`, `composer+npm`
 - `DEV_SERVER_CMD` / `DEV_SERVER_PORT` — how to start the app
 - `AGENT_SYSTEM_PROMPT` — a stack-tailored system prompt for the coding agents
 
-The resulting `.env` is loaded automatically on subsequent runs.
+Run `--configure` again any time you update `prompts/` to regenerate `.env`.
+
+### Two-Agent Pattern
+
+1. **Initializer Agent (Session 1):** Reads `app_spec.txt`, creates `feature_list.json` with 200 end-to-end test cases, sets up the project structure, and initializes git.
+
+2. **Coding Agent (Sessions 2+):** Picks up where the previous session left off, implements features one by one through the UI using browser automation, and marks them as passing in `feature_list.json`.
 
 ### Session Management
 
@@ -102,9 +133,23 @@ The resulting `.env` is loaded automatically on subsequent runs.
 - The agent auto-continues between sessions (3 second delay)
 - Press `Ctrl+C` to pause; run the same command to resume
 
+---
+
+## Important Timing Expectations
+
+> **Note: This system runs long tasks.**
+
+- **First session (initialization):** Generating `feature_list.json` with 200 test cases takes several minutes and may appear to hang — this is normal.
+- **Subsequent sessions:** Each coding iteration takes **5–15 minutes** depending on complexity.
+- **Full application:** Building all 200 features typically requires **many hours** across multiple sessions.
+
+**Tip:** Edit `prompts/initializer_prompt.md` and reduce the feature count (e.g. to 20–50) for faster runs.
+
+---
+
 ## Security Model
 
-This demo uses a defense-in-depth security approach (see `security.py` and `client.py`):
+Defense-in-depth approach (see `security.py` and `client.py`):
 
 1. **OS-level Sandbox:** Bash commands run in an isolated environment
 2. **Filesystem Restrictions:** File operations restricted to the project directory only
@@ -116,10 +161,12 @@ This demo uses a defense-in-depth security approach (see `security.py` and `clie
 
 Commands not in the allowlist are blocked by the security hook.
 
+---
+
 ## Project Structure
 
 ```
-autonomous-coding/
+acap/
 ├── autonomous_agent_demo.py  # Main entry point
 ├── agent.py                  # Agent session logic
 ├── client.py                 # Claude SDK client configuration
@@ -149,9 +196,9 @@ my_project/
 └── [application files]       # Generated application code
 ```
 
-## Running the Generated Application
+---
 
-After the agent completes (or pauses), you can run the generated application:
+## Running the Generated Application
 
 ```bash
 cd generations/my_project
@@ -164,7 +211,9 @@ npm install
 npm run dev
 ```
 
-The application will typically be available at `http://localhost:3000` or similar (check the agent's output or `init.sh` for the exact URL).
+The application will typically be available at `http://localhost:3000` (check the agent's output or `init.sh` for the exact URL).
+
+---
 
 ## Command Line Options
 
@@ -179,35 +228,41 @@ The application will typically be available at `http://localhost:3000` or simila
 | `--prompt-files` | Source file(s) for the wizard (requires `--prompt`) | interactive |
 | `--prompt-overwrite` | Overwrite existing `prompts/` files | — |
 
+---
+
 ## Customization
 
 ### Changing the Application
 
-The easiest way is to use the prompt wizard with a new requirements document:
+Use the prompt wizard with a new requirements document:
 ```bash
 python autonomous_agent_demo.py --prompt --prompt-files ./new_prd.txt --prompt-overwrite
 ```
 
-Or edit `prompts/app_spec.txt` directly to specify a different application.
+Or edit `prompts/app_spec.txt` directly.
 
 ### Adjusting Feature Count
 
-Edit `prompts/initializer_prompt.md` and change the "200 features" requirement to a smaller number for faster demos.
+Edit `prompts/initializer_prompt.md` and change the "200 features" requirement to a smaller number for faster runs.
 
 ### Modifying Allowed Commands
 
 Edit `security.py` to add or remove commands from `ALLOWED_COMMANDS`.
 
+---
+
 ## Troubleshooting
 
 **"Appears to hang on first run"**
-This is normal. The initializer agent is generating 200 detailed test cases, which takes significant time. Watch for `[Tool: ...]` output to confirm the agent is working.
+Normal. The initializer agent is generating 200 detailed test cases. Watch for `[Tool: ...]` output to confirm it is working.
 
 **"Command blocked by security hook"**
-The agent tried to run a command not in the allowlist. This is the security system working as intended. If needed, add the command to `ALLOWED_COMMANDS` in `security.py`.
+The agent tried to run a command not in the allowlist. This is the security system working as intended. Add the command to `ALLOWED_COMMANDS` in `security.py` if needed.
 
 **"Not authenticated"**
 Run `claude login` to authenticate via the Claude Code CLI. Alternatively, set `ANTHROPIC_API_KEY` in your environment.
+
+---
 
 ## License
 
