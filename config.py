@@ -16,6 +16,7 @@ import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
 
@@ -88,6 +89,35 @@ DEFAULT_SYSTEM_PROMPT = (
     "You are an expert full-stack developer building a production-quality web application."
 )
 
+ProviderId = Literal["claude", "codex", "omp", "opencode"]
+VALID_PROVIDER_IDS: set[str] = {"claude", "codex", "omp", "opencode"}
+
+
+def normalize_provider_id(value: str | None) -> str:
+    """
+    Normalize provider IDs with backwards-compatible fallback.
+
+    Any missing/invalid value defaults to "claude".
+    """
+    if not value:
+        return "claude"
+    normalized = value.strip().lower()
+    if normalized in VALID_PROVIDER_IDS:
+        return normalized
+    return "claude"
+
+
+def _parse_bool_env(value: str | None, default: bool) -> bool:
+    """Parse boolean-like env values with sensible defaults."""
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
 
 @dataclass
 class ProjectConfig:
@@ -121,6 +151,19 @@ class ProjectConfig:
     prompts_dir: str = "prompts"
     initializer_prompt_name: str = "initializer_prompt"
     coding_prompt_name: str = "coding_prompt"
+
+    # Agent CLI Provider Selection / Runtime
+    agent_cli_id: ProviderId = "claude"
+    agent_cli_bin_claude: str = "claude"
+    agent_cli_bin_codex: str = "codex"
+    agent_cli_bin_omp: str = "omp"
+    agent_cli_bin_opencode: str = "opencode"
+    agent_cli_model_claude: str = "claude-sonnet-4-6"
+    agent_cli_model_codex: str = "gpt-5-codex"
+    agent_cli_model_omp: str = "claude-sonnet-4-5"
+    agent_cli_model_opencode: str = "claude-sonnet-4-5"
+    agent_cli_warn_on_degraded_caps: bool = True
+    agent_cli_require_json_output: bool = True
 
     @property
     def allowed_commands(self) -> set[str]:
@@ -227,6 +270,29 @@ def get_config() -> ProjectConfig:
             "INITIALIZER_PROMPT_NAME", "initializer_prompt"
         ),
         coding_prompt_name=os.environ.get("CODING_PROMPT_NAME", "coding_prompt"),
+        agent_cli_id=normalize_provider_id(os.environ.get("AGENT_CLI_ID", "claude")),  # type: ignore[arg-type]
+        agent_cli_bin_claude=os.environ.get("AGENT_CLI_BIN_CLAUDE", "claude"),
+        agent_cli_bin_codex=os.environ.get("AGENT_CLI_BIN_CODEX", "codex"),
+        agent_cli_bin_omp=os.environ.get("AGENT_CLI_BIN_OMP", "omp"),
+        agent_cli_bin_opencode=os.environ.get("AGENT_CLI_BIN_OPENCODE", "opencode"),
+        agent_cli_model_claude=os.environ.get(
+            "AGENT_CLI_MODEL_CLAUDE", "claude-sonnet-4-6"
+        ),
+        agent_cli_model_codex=os.environ.get(
+            "AGENT_CLI_MODEL_CODEX", "gpt-5-codex"
+        ),
+        agent_cli_model_omp=os.environ.get(
+            "AGENT_CLI_MODEL_OMP", "claude-sonnet-4-5"
+        ),
+        agent_cli_model_opencode=os.environ.get(
+            "AGENT_CLI_MODEL_OPENCODE", "claude-sonnet-4-5"
+        ),
+        agent_cli_warn_on_degraded_caps=_parse_bool_env(
+            os.environ.get("AGENT_CLI_WARN_ON_DEGRADED_CAPS"), True
+        ),
+        agent_cli_require_json_output=_parse_bool_env(
+            os.environ.get("AGENT_CLI_REQUIRE_JSON_OUTPUT"), True
+        ),
     )
 
 

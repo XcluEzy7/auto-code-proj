@@ -30,8 +30,10 @@ class TestPrompterRetry(unittest.IsolatedAsyncioTestCase):
             stderr="",
         )
 
-        with mock.patch("prompter.subprocess.run", side_effect=[first, second]) as run_mock:
-            parsed = await run_generation_session("Build app", [], "claude-sonnet-4-6")
+        with mock.patch("prompter.run_prompt_task", side_effect=[first, second]) as run_mock:
+            parsed = await run_generation_session(
+                "Build app", [], "claude-sonnet-4-6", "claude"
+            )
             self.assertEqual(parsed["coding_prompt"], "# code")
             self.assertEqual(run_mock.call_count, 2)
 
@@ -49,9 +51,11 @@ class TestPrompterRetry(unittest.IsolatedAsyncioTestCase):
             stderr="",
         )
 
-        with mock.patch("prompter.subprocess.run", side_effect=[first, second]):
+        with mock.patch("prompter.run_prompt_task", side_effect=[first, second]):
             with self.assertRaises(RuntimeError) as ctx:
-                await run_generation_session("Build app", [], "claude-sonnet-4-6")
+                await run_generation_session(
+                    "Build app", [], "claude-sonnet-4-6", "claude"
+                )
             self.assertIn("Generation failed after one retry", str(ctx.exception))
 
 

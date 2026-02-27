@@ -25,6 +25,11 @@ from pathlib import Path
 from agent import run_autonomous_agent
 from config import get_config, reload_config
 from configure import run_configure
+from provider_cli import (
+    print_degraded_capability_warning,
+    provider_default_model,
+    resolve_provider_for_run,
+)
 from prompter import run_prompter
 
 
@@ -123,20 +128,53 @@ Authentication:
         help="Overwrite existing prompts/ files (requires --prompt).",
     )
 
+    parser.add_argument(
+        "--agent-cli",
+        type=str,
+        choices=["claude", "codex", "omp", "opencode"],
+        default=None,
+        help=(
+            "Agent CLI provider override for this run: "
+            "claude|codex|omp|opencode."
+        ),
+    )
+
+    parser.add_argument(
+        "--save-agent-cli",
+        action="store_true",
+        help="Persist --agent-cli as AGENT_CLI_ID in .env for future runs.",
+    )
+
     return parser.parse_args()
 
 
 def main() -> None:
     """Main entry point."""
     args = parse_args()
+    if args.save_agent_cli and not args.agent_cli:
+        raise ValueError("--save-agent-cli requires --agent-cli")
 
     async def _run() -> None:
+        cfg = get_config()
+        env_path = Path(__file__).parent / ".env"
+        provider_id = resolve_provider_for_run(
+            cfg=cfg,
+            cli_override=args.agent_cli,
+            save_override=args.save_agent_cli,
+            env_path=env_path,
+        )
+        cfg = reload_config()
+
+        print(f"Agent CLI provider: {provider_id}")
+        print_degraded_capability_warning(provider_id, cfg)
+
         # Step 0: Run prompt wizard if requested
         if args.prompt:
             success = await run_prompter(
                 prompt_files=args.prompt_files,
-                generation_model=args.model or get_config().claude_model,
+                generation_model=args.model,
                 overwrite=args.prompt_overwrite,
+                provider_id=provider_id,
             )
             if not success:
                 return
@@ -147,7 +185,10 @@ def main() -> None:
 
         # Step 1: Run configuration agent if requested
         if args.configure:
-            await run_configure(configure_model=args.configure_model)
+            await run_configure(
+                configure_model=args.configure_model,
+                provider_id=provider_id,
+            )
             # Reload config so the rest of the run uses freshly written .env
             cfg = reload_config()
             print("Configuration loaded. Starting coding agents...\n")
@@ -155,7 +196,7 @@ def main() -> None:
             cfg = get_config()
 
         # Step 2: Resolve model (CLI arg > .env > default)
-        model = args.model or cfg.claude_model
+        model = args.model or provider_default_model(provider_id, cfg)
 
         # Step 3: Resolve project directory
         project_dir = args.project_dir
@@ -171,6 +212,7 @@ def main() -> None:
             project_dir=project_dir,
             model=model,
             max_iterations=args.max_iterations,
+            provider_id=provider_id,
         )
 
     try:

@@ -16,9 +16,10 @@ Or standalone:
 import asyncio
 import json
 import os
-import subprocess
 from pathlib import Path
 
+from config import get_config
+from provider_cli import provider_default_model, run_prompt_task
 
 # Hardcoded defaults for paths — .env doesn't exist yet when this runs
 DEFAULT_PROMPTS_DIR = "prompts"
@@ -263,6 +264,22 @@ def write_env_file(config_data: dict, env_path: Path | None = None) -> Path:
         f"INITIALIZER_PROMPT_NAME={config_data.get('initializer_prompt_name', 'initializer_prompt')}",
         f"CODING_PROMPT_NAME={config_data.get('coding_prompt_name', 'coding_prompt')}",
         "",
+        "# =============================================================================",
+        "# Agent CLI Provider",
+        "# =============================================================================",
+        "",
+        f"AGENT_CLI_ID={os.environ.get('AGENT_CLI_ID', 'claude')}",
+        f"AGENT_CLI_BIN_CLAUDE={os.environ.get('AGENT_CLI_BIN_CLAUDE', 'claude')}",
+        f"AGENT_CLI_BIN_CODEX={os.environ.get('AGENT_CLI_BIN_CODEX', 'codex')}",
+        f"AGENT_CLI_BIN_OMP={os.environ.get('AGENT_CLI_BIN_OMP', 'omp')}",
+        f"AGENT_CLI_BIN_OPENCODE={os.environ.get('AGENT_CLI_BIN_OPENCODE', 'opencode')}",
+        f"AGENT_CLI_MODEL_CLAUDE={os.environ.get('AGENT_CLI_MODEL_CLAUDE', 'claude-sonnet-4-6')}",
+        f"AGENT_CLI_MODEL_CODEX={os.environ.get('AGENT_CLI_MODEL_CODEX', 'gpt-5-codex')}",
+        f"AGENT_CLI_MODEL_OMP={os.environ.get('AGENT_CLI_MODEL_OMP', 'claude-sonnet-4-5')}",
+        f"AGENT_CLI_MODEL_OPENCODE={os.environ.get('AGENT_CLI_MODEL_OPENCODE', 'claude-sonnet-4-5')}",
+        f"AGENT_CLI_WARN_ON_DEGRADED_CAPS={os.environ.get('AGENT_CLI_WARN_ON_DEGRADED_CAPS', 'true')}",
+        f"AGENT_CLI_REQUIRE_JSON_OUTPUT={os.environ.get('AGENT_CLI_REQUIRE_JSON_OUTPUT', 'true')}",
+        "",
     ]
 
     env_path.write_text("\n".join(lines))
@@ -272,6 +289,7 @@ def write_env_file(config_data: dict, env_path: Path | None = None) -> Path:
 async def run_configure(
     configure_model: str | None = None,
     prompts_dir: str = DEFAULT_PROMPTS_DIR,
+    provider_id: str | None = None,
 ) -> dict:
     """
     Run the configuration detection agent.
@@ -287,21 +305,24 @@ async def run_configure(
     Returns:
         Dict of detected configuration values.
     """
-    model = configure_model or os.environ.get("CONFIGURE_MODEL", "claude-haiku-4-5-20251001")
+    cfg = get_config()
+    provider = provider_id or cfg.agent_cli_id
+    model = (
+        configure_model
+        or os.environ.get("CONFIGURE_MODEL")
+        or provider_default_model(provider, cfg)
+    )
 
-    print(f"\n[Configure] Detecting tech stack with {model}...\n")
+    print(f"\n[Configure] Detecting tech stack with {model} via {provider}...\n")
 
-    result = subprocess.run(
-        [
-            "claude", "-p",
-            "--model", model,
-            "--allowedTools", "Read,Glob,Edit,Bash,Task",
-            "--system-prompt", CONFIGURE_SYSTEM_PROMPT,
-        ],
-        input=build_configure_prompt(prompts_dir),
-        capture_output=True,
-        text=True,
-        cwd=str(Path.cwd()),
+    result = run_prompt_task(
+        provider_id=provider,
+        model=model,
+        system_prompt=CONFIGURE_SYSTEM_PROMPT,
+        prompt=build_configure_prompt(prompts_dir),
+        cwd=Path.cwd(),
+        cfg=cfg,
+        allowed_tools="Read,Glob,Edit,Bash,Task",
     )
 
     if result.returncode != 0:

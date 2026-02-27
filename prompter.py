@@ -17,10 +17,11 @@ Or standalone:
 """
 
 import asyncio
-import subprocess
 from pathlib import Path
 
+from config import get_config
 from configure import extract_json_from_text
+from provider_cli import provider_default_model, run_prompt_task
 
 
 DEFAULT_ANALYSIS_MODEL = "claude-haiku-4-5-20251001"
@@ -128,7 +129,7 @@ def collect_source_documents(prompt_files: list[str] | None) -> str:
     return result
 
 
-async def run_analysis_session(content: str, model: str) -> dict:
+async def run_analysis_session(content: str, model: str, provider_id: str) -> dict:
     """
     Phase 2: AI analysis session — understand requirements, generate clarifying questions.
 
@@ -151,16 +152,15 @@ async def run_analysis_session(content: str, model: str) -> dict:
         "Output ONLY a valid JSON object as described in your instructions."
     )
 
-    result = subprocess.run(
-        [
-            "claude", "-p",
-            "--model", model,
-            "--allowedTools", "Edit,Bash,Task",
-            "--system-prompt", ANALYSIS_SYSTEM_PROMPT,
-        ],
-        input=query,
-        capture_output=True,
-        text=True,
+    cfg = get_config()
+    result = run_prompt_task(
+        provider_id=provider_id,
+        model=model,
+        system_prompt=ANALYSIS_SYSTEM_PROMPT,
+        prompt=query,
+        cwd=Path.cwd(),
+        cfg=cfg,
+        allowed_tools="Edit,Bash,Task",
     )
 
     if result.returncode != 0:
@@ -219,7 +219,7 @@ def _load_template(filename: str) -> str:
 
 
 async def run_generation_session(
-    content: str, qa_pairs: list[dict], model: str
+    content: str, qa_pairs: list[dict], model: str, provider_id: str
 ) -> dict:
     """
     Phase 4: AI generation session — produce all three prompt files.
@@ -282,16 +282,15 @@ async def run_generation_session(
         "- Ensure all newlines inside values are valid JSON escaped newlines."
     )
 
-    result = subprocess.run(
-        [
-            "claude", "-p",
-            "--model", model,
-            "--allowedTools", "Edit,Bash,Task",
-            "--system-prompt", GENERATION_SYSTEM_PROMPT,
-        ],
-        input=query,
-        capture_output=True,
-        text=True,
+    cfg = get_config()
+    result = run_prompt_task(
+        provider_id=provider_id,
+        model=model,
+        system_prompt=GENERATION_SYSTEM_PROMPT,
+        prompt=query,
+        cwd=Path.cwd(),
+        cfg=cfg,
+        allowed_tools="Edit,Bash,Task",
     )
 
     if result.returncode != 0:
@@ -319,16 +318,14 @@ async def run_generation_session(
             f"{result.stdout[:12000]}"
         )
 
-        retry_result = subprocess.run(
-            [
-                "claude", "-p",
-                "--model", model,
-                "--allowedTools", "Edit,Bash,Task",
-                "--system-prompt", GENERATION_SYSTEM_PROMPT,
-            ],
-            input=repair_query,
-            capture_output=True,
-            text=True,
+        retry_result = run_prompt_task(
+            provider_id=provider_id,
+            model=model,
+            system_prompt=GENERATION_SYSTEM_PROMPT,
+            prompt=repair_query,
+            cwd=Path.cwd(),
+            cfg=cfg,
+            allowed_tools="Edit,Bash,Task",
         )
 
         if retry_result.returncode != 0:
@@ -400,6 +397,7 @@ async def run_prompter(
     analysis_model: str | None = None,
     generation_model: str | None = None,
     overwrite: bool = False,
+    provider_id: str | None = None,
 ) -> bool:
     """
     Orchestrate all five phases of the prompt wizard.
@@ -411,10 +409,12 @@ async def run_prompter(
         generation_model: Model for Phase 4 generation (default: sonnet).
         overwrite: If True, overwrite existing prompts/ files.
     """
+    cfg = get_config()
+    provider = provider_id or cfg.agent_cli_id
     if analysis_model is None:
-        analysis_model = DEFAULT_ANALYSIS_MODEL
+        analysis_model = provider_default_model(provider, cfg) or DEFAULT_ANALYSIS_MODEL
     if generation_model is None:
-        generation_model = DEFAULT_GENERATION_MODEL
+        generation_model = provider_default_model(provider, cfg) or DEFAULT_GENERATION_MODEL
 
     prompts_dir = Path("prompts")
 
@@ -433,7 +433,7 @@ async def run_prompter(
 
     # Phase 2: Analysis session
     try:
-        analysis_result = await run_analysis_session(content, analysis_model)
+        analysis_result = await run_analysis_session(content, analysis_model, provider)
     except Exception as e:
         print(f"\nError during analysis: {e}")
         return False
@@ -445,7 +445,7 @@ async def run_prompter(
 
     # Phase 4: Generation session
     try:
-        generated = await run_generation_session(content, qa_pairs, generation_model)
+        generated = await run_generation_session(content, qa_pairs, generation_model, provider)
     except Exception as e:
         print(f"\nError during generation: {e}")
         return False

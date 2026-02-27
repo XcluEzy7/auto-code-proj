@@ -1,0 +1,8 @@
+[project]
+name = "acap-system"
+version = "0.1.0"
+description = "Autonomous Coding Agent Prep System"
+requires-python = ">=3.12"
+dependencies = [
+    "python-dotenv>=1.0.0",
+]

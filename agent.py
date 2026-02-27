@@ -7,12 +7,12 @@ Uses subprocess piping to the Claude CLI instead of the SDK.
 """
 
 import asyncio
-import subprocess
 from pathlib import Path
 from typing import Optional
 
 from client import create_settings
 from config import get_config
+from provider_cli import run_agent_task
 from progress import print_session_header, print_progress_summary
 from prompts import get_initializer_prompt, get_coding_prompt, copy_spec_to_project
 
@@ -22,6 +22,7 @@ def run_agent_session(
     project_dir: Path,
     model: str,
     settings_file: Path,
+    provider_id: str,
 ) -> tuple[str, str]:
     """
     Run a single agent session by piping the prompt to the Claude CLI via stdin.
@@ -31,6 +32,7 @@ def run_agent_session(
         project_dir: Project directory path
         model: Claude model to use
         settings_file: Path to the settings JSON file
+        provider_id: Selected CLI provider ID
 
     Returns:
         (status, response_text) where status is:
@@ -39,22 +41,16 @@ def run_agent_session(
     """
     cfg = get_config()
 
-    cmd = [
-        "claude",
-        "--dangerously-skip-permissions",
-        "--model", model,
-        "--settings", str(settings_file.resolve()),
-        "--append-system-prompt", cfg.agent_system_prompt,
-    ]
+    print(f"Sending prompt to {provider_id} CLI...\n")
 
-    print("Sending prompt to Claude CLI...\n")
-
-    result = subprocess.run(
-        cmd,
-        input=prompt,
-        capture_output=True,
-        text=True,
-        cwd=str(project_dir.resolve()),
+    result = run_agent_task(
+        provider_id=provider_id,
+        model=model,
+        system_prompt=cfg.agent_system_prompt,
+        prompt=prompt,
+        cwd=project_dir.resolve(),
+        cfg=cfg,
+        settings_file=settings_file,
     )
 
     if result.returncode != 0:
@@ -71,6 +67,7 @@ async def run_autonomous_agent(
     project_dir: Path,
     model: str,
     max_iterations: Optional[int] = None,
+    provider_id: str = "claude",
 ) -> None:
     """
     Run the autonomous agent loop.
@@ -87,6 +84,7 @@ async def run_autonomous_agent(
     print("=" * 70)
     print(f"\nProject directory: {project_dir}")
     print(f"Model: {model}")
+    print(f"Provider: {provider_id}")
     if max_iterations:
         print(f"Max iterations: {max_iterations}")
     else:
@@ -140,7 +138,13 @@ async def run_autonomous_agent(
             prompt = get_coding_prompt()
 
         # Run session
-        status, _ = run_agent_session(prompt, project_dir, model, settings_file)
+        status, _ = run_agent_session(
+            prompt=prompt,
+            project_dir=project_dir,
+            model=model,
+            settings_file=settings_file,
+            provider_id=provider_id,
+        )
 
         # Handle status
         if status == "continue":
