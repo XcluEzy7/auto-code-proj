@@ -1,12 +1,11 @@
-"""Shared models for the ACAP Textual TUI."""
+"""Core TUI types and enums (Textual-free)."""
 
-from dataclasses import dataclass, field
 from enum import Enum
+from dataclasses import dataclass, field
 
 
 class PromptFlowPhase(str, Enum):
     """Ordered phases in the prep flow."""
-
     ANALYZE = "analyze"
     QA = "qa"
     GENERATE = "generate"
@@ -21,7 +20,6 @@ PHASE_STATUSES = {"queued", "running", "done", "warn"}
 @dataclass
 class PhaseState:
     """Runtime state for a phase."""
-
     phase: PromptFlowPhase
     label: str
     status: str = "queued"
@@ -32,7 +30,6 @@ class PhaseState:
 @dataclass
 class FlowState:
     """Top-level UI state for prompt/configure flow."""
-
     current_phase: PromptFlowPhase = PromptFlowPhase.ANALYZE
     stream_mode: bool = False
     logs: list[str] = field(default_factory=list)
@@ -41,7 +38,6 @@ class FlowState:
 @dataclass
 class ClarifyingQuestion:
     """A single clarifying question and user answer."""
-
     question: str
     why: str = ""
     answer: str = ""

@@ -9,7 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from run_logging import RunLogger
-from tui_app import run_handoff_command_with_logging
+from handoff import run_handoff_command_with_logging
 
 
 class TestRunLogging(unittest.TestCase):
@@ -88,4 +88,3 @@ class TestRunLogging(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

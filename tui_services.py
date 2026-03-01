@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from config import get_config
-from tui_models import PromptFlowPhase
+from tui_core import PromptFlowPhase
 
 PHASE_WEIGHTS: dict[PromptFlowPhase, int] = {
     PromptFlowPhase.ANALYZE: 15,

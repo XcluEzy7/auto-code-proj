@@ -4,8 +4,8 @@
 import unittest
 from pathlib import Path
 
+from tui_core import PromptFlowPhase
 from tui_services import (
-    PromptFlowPhase,
     build_handoff_command,
     compute_flow_completion,
 )
