@@ -4,22 +4,13 @@ Autonomous Coding Agent Demo
 ============================
 
 A minimal harness demonstrating long-running autonomous coding with Claude.
-This script implements the two-agent pattern (initializer + coding agent) and
-incorporates all the strategies from the long-running agents guide.
-
-Example Usage:
-    # Auto-detect tech stack and write .env, then start coding:
-    python acaps.py --project-dir ./my_project --configure
-
-    # Start (or resume) using existing .env config:
-    python acaps.py --project-dir ./my_project
-
-    # Limit iterations for testing:
-    python acaps.py --project-dir ./my_project --max-iterations 5
 """
 
 import argparse
 import asyncio
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from agent import run_autonomous_agent
@@ -33,126 +24,160 @@ from provider_cli import (
 from prompter import run_prompter
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
+def launch_tui(mode: str, args: argparse.Namespace) -> int:
+    """Launch the OpenTui frontend with the given mode."""
+    # Check for bun
+    try:
+        subprocess.run(["bun", "--version"], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("Error: Bun is required to run the TUI.", file=sys.stderr)
+        print("Install it from https://bun.sh", file=sys.stderr)
+        return 1
+
+    # Set environment variables for the TUI
+    env = os.environ.copy()
+    env["ACAP_TUI_MODE"] = mode
+    if args.project_dir:
+        env["ACAP_PROJECT_DIR"] = str(args.project_dir)
+    if args.prompt_files:
+        env["ACAP_PROMPT_FILES"] = " ".join(args.prompt_files)
+    if args.agent_cli:
+        env["ACAP_PROVIDER"] = args.agent_cli
+    if args.model:
+        env["ACAP_MODEL"] = args.model
+    if args.prompt_overwrite:
+        env["ACAP_OVERWRITE"] = "1"
+
+    # Launch the TUI
+    opentui_dir = Path(__file__).parent / "opentui"
+    cmd = ["bun", "run", "index.ts"]
+
+    return subprocess.run(cmd, cwd=opentui_dir, env=env).returncode
+
+
+def create_parser() -> argparse.ArgumentParser:
+    """Create argument parser with TUI subcommands and legacy options."""
     cfg = get_config()
 
     parser = argparse.ArgumentParser(
         description="Autonomous Coding Agent Demo - Long-running agent harness",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Generate prompts interactively from pasted text:
-  python acaps.py --prompt
+TUI Mode (New OpenTui interface):
+  acaps.py tui run              Full end-to-end prep flow
+  acaps.py tui prompt           Prompt wizard only
+  acaps.py tui configure        Configure only
 
-  # Generate prompts from a PRD file:
-  python acaps.py --prompt --prompt-files ./my_prd.txt
-
-  # Full pipeline: generate prompts → detect stack → run agents:
-  python acaps.py --prompt --configure --project-dir ./my_project
-
-  # First time — detect stack, write .env, then run:
-  python acaps.py --project-dir ./my_project --configure
-
-  # Resume or start with existing .env:
-  python acaps.py --project-dir ./my_project
-
-  # Override the model for this run only:
-  python acaps.py --project-dir ./my_project --model claude-opus-4-6
-
-  # Limit iterations for testing:
-  python acaps.py --project-dir ./my_project --max-iterations 5
-
-  # Regenerate .env after editing prompts/:
-  python acaps.py --configure
+CLI Mode (Legacy):
+  acaps.py --prompt             Generate prompts interactively
+  acaps.py --prompt --configure Full pipeline
+  acaps.py --project-dir DIR    Run coding agents
 
 Authentication:
-  Run 'claude login' once to authenticate via the Claude Code CLI.
-  Alternatively, set ANTHROPIC_API_KEY in your environment.
+  Run 'claude login' once to authenticate.
         """,
     )
 
-    parser.add_argument(
-        "--project-dir",
-        type=Path,
-        default=Path("./autonomous_demo_project"),
-        help="Directory for the project (default: autonomous_demo_project). "
-             "Relative paths are automatically placed under the PROJECT_DIR_PREFIX directory.",
-    )
+    # Create subparsers for tui command
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
 
+    # TUI subcommand
+    tui_parser = subparsers.add_parser("tui", help="Launch OpenTui interface (requires Bun)")
+    tui_subparsers = tui_parser.add_subparsers(dest="tui_command", required=True, help="TUI mode")
+
+    # TUI run (full flow)
+    tui_run = tui_subparsers.add_parser("run", help="Full end-to-end prep flow")
+    _add_common_args(tui_run)
+
+    # TUI prompt-only
+    tui_prompt = tui_subparsers.add_parser("prompt", help="Prompt wizard only")
+    _add_common_args(tui_prompt)
+
+    # TUI configure-only
+    tui_configure = tui_subparsers.add_parser("configure", help="Configure only")
+    _add_common_args(tui_configure)
+
+    # Legacy mode arguments (at root level)
+    _add_common_args(parser)
     parser.add_argument(
         "--max-iterations",
         type=int,
         default=None,
         help="Maximum number of agent iterations (default: unlimited)",
     )
-
-    parser.add_argument(
-        "--model",
-        type=str,
-        default=None,
-        help=f"Claude model to use (default: {cfg.claude_model} from .env or CLAUDE_MODEL)",
-    )
-
     parser.add_argument(
         "--configure",
         action="store_true",
-        help="Run the configuration agent to detect the tech stack and write .env, "
-             "then continue with the coding agents.",
+        help="Run the configuration agent to detect tech stack and write .env",
     )
-
     parser.add_argument(
         "--configure-model",
         type=str,
         default=None,
-        help=f"Model for the --configure agent (default: {cfg.configure_model} "
-             f"from .env or CONFIGURE_MODEL)",
+        help=f"Model for configure agent (default: {cfg.configure_model})",
     )
-
     parser.add_argument(
         "--prompt",
         action="store_true",
-        help="Launch the interactive prompt wizard to generate prompts/ files from your PRD.",
+        help="Launch interactive prompt wizard",
+    )
+    parser.add_argument(
+        "--save-agent-cli",
+        action="store_true",
+        help="Persist --agent-cli to .env",
     )
 
+    return parser
+
+
+def _add_common_args(parser: argparse.ArgumentParser) -> None:
+    """Add arguments common to all modes."""
+    cfg = get_config()
+    parser.add_argument(
+        "--project-dir",
+        type=Path,
+        default=Path("./autonomous_demo_project"),
+        help="Directory for the project",
+    )
     parser.add_argument(
         "--prompt-files",
         nargs="+",
         metavar="FILE",
-        help="One or more file paths to use as source material (requires --prompt).",
+        help="File(s) to use as source material",
     )
-
-    parser.add_argument(
-        "--prompt-overwrite",
-        action="store_true",
-        help="Overwrite existing prompts/ files (requires --prompt).",
-    )
-
     parser.add_argument(
         "--agent-cli",
         type=str,
         choices=["claude", "codex", "omp", "opencode"],
         default=None,
-        help=(
-            "Agent CLI provider override for this run: "
-            "claude|codex|omp|opencode."
-        ),
+        help="Agent CLI provider override",
     )
-
     parser.add_argument(
-        "--save-agent-cli",
+        "--model",
+        type=str,
+        default=None,
+        help=f"Model to use (default: {cfg.claude_model})",
+    )
+    parser.add_argument(
+        "--prompt-overwrite",
         action="store_true",
-        help="Persist --agent-cli as AGENT_CLI_ID in .env for future runs.",
+        help="Overwrite existing prompts/ files",
     )
 
-    return parser.parse_args()
 
-
-def main() -> None:
+def main() -> int:
     """Main entry point."""
-    args = parse_args()
+    parser = create_parser()
+    args = parser.parse_args()
+
+    # Handle TUI mode
+    if args.command == "tui":
+        return launch_tui(args.tui_command, args)
+
+    # Legacy CLI mode
     if args.save_agent_cli and not args.agent_cli:
-        raise ValueError("--save-agent-cli requires --agent-cli")
+        print("Error: --save-agent-cli requires --agent-cli", file=sys.stderr)
+        return 1
 
     async def _run() -> None:
         cfg = get_config()
@@ -185,18 +210,16 @@ def main() -> None:
             )
             if not success:
                 return
-            print("Prompt files generated. You can now run --configure to detect the stack.\n")
-            # If --configure not also passed, stop here
+            print("Prompt files generated. Run --configure to detect the stack.\n")
             if not args.configure:
                 return
 
-        # Step 1: Run configuration agent if requested
+        # Step 1: Run configuration
         if args.configure:
             await run_configure(
                 configure_model=args.configure_model or model,
                 provider_id=provider_id,
             )
-            # Reload config so the rest of the run uses freshly written .env
             cfg = reload_config()
             print("Configuration loaded. Starting coding agents...\n")
         else:
@@ -206,12 +229,10 @@ def main() -> None:
         project_dir = args.project_dir
         prefix = cfg.project_dir_prefix.rstrip("/")
         if not str(project_dir).startswith(prefix + "/"):
-            if project_dir.is_absolute():
-                pass  # Use absolute paths as-is
-            else:
+            if not project_dir.is_absolute():
                 project_dir = Path(prefix) / project_dir
 
-        # Step 4: Run the autonomous coding agent
+        # Step 4: Run autonomous agent
         await run_autonomous_agent(
             project_dir=project_dir,
             model=model,
@@ -221,13 +242,7 @@ def main() -> None:
 
     try:
         asyncio.run(_run())
+        return 0
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
         print("To resume, run the same command again")
-    except Exception as e:
-        print(f"\nFatal error: {e}")
-        raise
-
-
-if __name__ == "__main__":
-    main()
